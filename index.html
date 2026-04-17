@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#16213e" />
+  <link rel="manifest" href="manifest.json" />
+  <link rel="icon" href="icons/icon-192.png" />
+  <link rel="apple-touch-icon" href="icons/icon-192.png" />
+  <title>Weather App</title>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/icon?family=Material+Icons" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div id="app">
+    <!-- Search -->
+    <header>
+      <div class="search-box">
+        <input type="text" id="searchInput" placeholder="Search city..." autocomplete="off" />
+        <button id="searchBtn" aria-label="Search"><span class="material-icons">search</span></button>
+        <button id="geoBtn" aria-label="Use my location"><span class="material-icons">my_location</span></button>
+        <button id="settingsBtn" aria-label="Settings"><span class="material-icons">settings</span></button>
+      </div>
+      <div id="suggestions" class="suggestions hidden"></div>
+    </header>
+
+    <!-- Settings Panel -->
+    <section id="settingsPanel" class="card hidden">
+      <div class="settings-header">
+        <h2>Settings</h2>
+        <button id="closeSettings" class="icon-btn"><span class="material-icons">close</span></button>
+      </div>
+      <div class="setting-row">
+        <span>Temperature Unit</span>
+        <div class="unit-toggle">
+          <button class="unit-btn active" data-unit="fahrenheit">&deg;F</button>
+          <button class="unit-btn" data-unit="celsius">&deg;C</button>
+        </div>
+      </div>
+      <hr class="settings-divider" />
+      <div class="settings-header" style="margin-top:12px">
+        <h2>Saved Locations</h2>
+        <button id="saveLocationBtn" class="icon-btn" aria-label="Save current location"><span class="material-icons">add</span></button>
+      </div>
+      <div id="locationsList" class="locations-list">
+        <div class="empty-locations">Search for a city, then tap + to save it</div>
+      </div>
+    </section>
+
+    <!-- Loading -->
+    <div id="loading" class="loading hidden">
+      <div class="spinner"></div>
+    </div>
+
+    <!-- Error -->
+    <div id="error" class="error hidden"></div>
+
+    <!-- Current Conditions -->
+    <section id="current" class="card hidden">
+      <div class="current-header">
+        <h1 id="cityName"></h1>
+        <span id="currentDate"></span>
+      </div>
+      <div class="current-main">
+        <div class="current-temp">
+          <span id="weatherIcon" class="weather-icon"></span>
+          <span id="currentTemp"></span>
+        </div>
+        <span id="weatherDesc" class="weather-desc"></span>
+      </div>
+      <div class="current-details">
+        <div class="detail">
+          <span class="detail-label">Dew Point</span>
+          <span id="dewPoint" class="detail-value"></span>
+        </div>
+        <div class="detail">
+          <span class="detail-label">Humidity</span>
+          <span id="humidity" class="detail-value"></span>
+        </div>
+        <div class="detail">
+          <span class="detail-label">Wind Speed</span>
+          <span id="windSpeed" class="detail-value"></span>
+        </div>
+        <div class="detail">
+          <span class="detail-label">Wind Direction</span>
+          <span id="windDir" class="detail-value"></span>
+        </div>
+        <div class="detail">
+          <span class="detail-label">Feels Like</span>
+          <span id="feelsLike" class="detail-value"></span>
+        </div>
+        <div class="detail">
+          <span class="detail-label">UV Index</span>
+          <span id="uvIndex" class="detail-value"></span>
+        </div>
+      </div>
+    </section>
+
+    <!-- Hourly Forecast -->
+    <section id="hourly" class="card hidden">
+      <h2>Hourly Forecast</h2>
+      <div id="hourlyList" class="hourly-scroll"></div>
+    </section>
+
+    <!-- 10-Day Forecast -->
+    <section id="daily" class="card hidden">
+      <h2>10-Day Forecast</h2>
+      <div id="dailyList" class="daily-list"></div>
+    </section>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
