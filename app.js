@@ -281,6 +281,7 @@ async function fetchWeather(lat, lon, name) {
     renderCurrent(data, name);
     renderHourly(data);
     renderDaily(data);
+    lastFetchTime = Date.now();
   } catch {
     showError('Failed to fetch weather data. Please try again.');
   } finally {
@@ -408,6 +409,16 @@ function hideWeather() {
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('sw.js');
 }
+
+// ── Refresh on focus (if data is stale) ──
+let lastFetchTime = 0;
+const STALE_MS = 10 * 60 * 1000; // 10 minutes
+
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && currentLocation && Date.now() - lastFetchTime > STALE_MS) {
+    fetchWeather(currentLocation.lat, currentLocation.lon, currentLocation.name);
+  }
+});
 
 // ── Load last viewed or first saved location on startup ──
 (function init() {
