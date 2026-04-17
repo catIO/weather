@@ -531,3 +531,20 @@ header {
   padding: 12px;
   font-size: 14px;
 }
+
+.attribution {
+  text-align: center;
+  padding: 16px 0 8px;
+  font-size: 11px;
+  color: var(--text-muted);
+  opacity: 0.6;
+}
+
+.attribution a {
+  color: var(--text-muted);
+  text-decoration: none;
+}
+
+.attribution a:hover {
+  color: var(--accent);
+}
