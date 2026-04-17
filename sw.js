@@ -41,8 +41,16 @@ self.addEventListener('fetch', (e) => {
     return;
   }
 
-  // Cache-first for static assets
+  // Cache-first for static assets, but update cache in background (stale-while-revalidate)
   e.respondWith(
-    caches.match(e.request).then((cached) => cached || fetch(e.request))
+    caches.open(CACHE_NAME).then((cache) =>
+      cache.match(e.request).then((cached) => {
+        const fetched = fetch(e.request).then((res) => {
+          cache.put(e.request, res.clone());
+          return res;
+        });
+        return cached || fetched;
+      })
+    )
   );
 });

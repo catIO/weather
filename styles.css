@@ -306,6 +306,11 @@ header {
   font-size: 14px;
 }
 
+.h-precip.low-precip,
+.daily-precip.low-precip {
+  color: var(--text-muted);
+}
+
 .hourly-item .h-wind {
   display: flex;
   align-items: center;

@@ -298,8 +298,11 @@ function renderCurrent(data, name) {
   const [icon, desc] = weatherInfo(c.weather_code);
 
   $('cityName').textContent = name;
-  $('currentDate').textContent = new Date().toLocaleDateString('en-US', {
+  const now = new Date();
+  $('currentDate').textContent = now.toLocaleDateString('en-US', {
     weekday: 'long', month: 'long', day: 'numeric',
+  }) + '  ·  ' + now.toLocaleTimeString('en-US', {
+    hour: 'numeric', minute: '2-digit',
   });
   $('weatherIcon').textContent = icon;
   $('currentTemp').textContent = `${Math.round(c.temperature_2m)}${unitLabel()}`;
@@ -342,7 +345,7 @@ function renderHourly(data) {
       <div class="hour">${i === 0 ? 'Now' : dt.toLocaleTimeString('en-US', { hour: 'numeric' })}</div>
       <div class="h-icon">${icon}</div>
       <div class="h-temp">${temp}°</div>
-      <div class="h-precip"><span class="material-icons">water_drop</span> ${precip}%</div>
+      <div class="h-precip${precip < 10 ? ' low-precip' : ''}"><span class="material-icons">water_drop</span> ${precip}%</div>
       <div class="h-wind"><span class="material-icons">air</span> ${wind} ${wdir}</div>
     `;
     list.appendChild(div);
@@ -376,7 +379,7 @@ function renderDaily(data) {
       <div class="daily-day">${dayName}<div class="daily-date">${dateStr}</div></div>
       <div class="daily-icon">${icon}</div>
       <div class="daily-temps"><span class="daily-high">${high}°</span><span class="daily-low">${low}°</span></div>
-      <div class="daily-precip"><span class="material-icons">water_drop</span> ${dPrecip}%</div>
+      <div class="daily-precip${dPrecip < 10 ? ' low-precip' : ''}"><span class="material-icons">water_drop</span> ${dPrecip}%</div>
       <div class="daily-wind"><span class="material-icons">air</span> ${dWind} ${windLabel()} ${dDir}</div>
     `;
     list.appendChild(div);
