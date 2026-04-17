@@ -40,6 +40,23 @@ function windDirection(degrees) {
   return dirs[Math.round(degrees / 22.5) % 16];
 }
 
+function pressureTrend(data) {
+  const times = data.hourly.time;
+  const pressures = data.hourly.pressure_msl;
+  const now = new Date();
+  let nowIdx = times.findIndex((t) => new Date(t) >= now);
+  if (nowIdx < 0) nowIdx = times.length - 1;
+  const threeHoursAgo = new Date(now.getTime() - 3 * 60 * 60 * 1000);
+  let pastIdx = times.findIndex((t) => new Date(t) >= threeHoursAgo);
+  if (pastIdx < 0) pastIdx = 0;
+  const diff = pressures[nowIdx] - pressures[pastIdx];
+  if (diff > 2) return 'Rising fast';
+  if (diff > 0.5) return 'Rising';
+  if (diff < -2) return 'Falling fast';
+  if (diff < -0.5) return 'Falling';
+  return 'Steady';
+}
+
 // ── DOM refs ──
 const $ = (id) => document.getElementById(id);
 const searchInput = $('searchInput');
@@ -265,8 +282,8 @@ async function fetchWeather(lat, lon, name) {
     const params = new URLSearchParams({
       latitude: lat,
       longitude: lon,
-      current: 'temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m,wind_direction_10m,dew_point_2m,uv_index',
-      hourly: 'temperature_2m,weather_code,wind_speed_10m,wind_direction_10m,precipitation_probability',
+      current: 'temperature_2m,relative_humidity_2m,weather_code,wind_speed_10m,wind_direction_10m,dew_point_2m,uv_index,pressure_msl',
+      hourly: 'temperature_2m,weather_code,wind_speed_10m,wind_direction_10m,precipitation_probability,pressure_msl',
       daily: 'weather_code,temperature_2m_max,temperature_2m_min,wind_speed_10m_max,wind_direction_10m_dominant,precipitation_probability_max',
       temperature_unit: tempUnit,
       wind_speed_unit: windUnit,
@@ -310,8 +327,13 @@ function renderCurrent(data, name) {
   $('dewPoint').textContent = `${Math.round(c.dew_point_2m)}${unitLabel()}`;
   $('humidity').textContent = `${c.relative_humidity_2m}%`;
   $('windSpeed').textContent = `${Math.round(c.wind_speed_10m)} ${windLabel()}`;
-  $('windDir').textContent = `${windDirection(c.wind_direction_10m)} (${c.wind_direction_10m}°)`;
-  $('feelsLike').textContent = `${Math.round(c.apparent_temperature)}${unitLabel()}`;
+  $('windDir').innerHTML = `${windDirection(c.wind_direction_10m)}<span class="wind-dir">${String(Math.round(c.wind_direction_10m)).padStart(3, '0')}°</span>`;
+
+  // Pressure with 3-hour trend
+  const currentPressure = Math.round(c.pressure_msl);
+  const trend = pressureTrend(data);
+  $('pressure').innerHTML = `${currentPressure} hPa<span class="pressure-trend">${trend}</span>`;
+
   $('uvIndex').textContent = c.uv_index != null ? Math.round(c.uv_index) : '—';
 
   currentEl.classList.remove('hidden');

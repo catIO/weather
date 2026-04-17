@@ -243,6 +243,26 @@ header {
   font-weight: 600;
 }
 
+.pressure-trend {
+  display: block;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.pressure-trend .material-icons {
+  font-size: 16px;
+}
+
+.wind-dir {
+  display: block;
+  font-size: 14px;
+  font-weight: 400;
+  color: var(--text);
+  margin-top: 2px;
+}
+
 /* Hourly */
 .hourly-scroll {
   display: flex;
