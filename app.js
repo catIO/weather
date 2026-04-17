@@ -4,8 +4,8 @@ const WMO_CODES = {
   1: ['🌤️', 'Mainly clear'],
   2: ['⛅', 'Partly cloudy'],
   3: ['☁️', 'Overcast'],
-  45: ['🌫️', 'Foggy'],
-  48: ['🌫️', 'Depositing rime fog'],
+  45: ['😶‍🌫️', 'Foggy'],
+  48: ['😶‍🌫️', 'Depositing rime fog'],
   51: ['🌦️', 'Light drizzle'],
   53: ['🌦️', 'Moderate drizzle'],
   55: ['🌧️', 'Dense drizzle'],
@@ -266,8 +266,8 @@ async function fetchWeather(lat, lon, name) {
       latitude: lat,
       longitude: lon,
       current: 'temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m,wind_direction_10m,dew_point_2m,uv_index',
-      hourly: 'temperature_2m,weather_code,wind_speed_10m,wind_direction_10m',
-      daily: 'weather_code,temperature_2m_max,temperature_2m_min,wind_speed_10m_max,wind_direction_10m_dominant',
+      hourly: 'temperature_2m,weather_code,wind_speed_10m,wind_direction_10m,precipitation_probability',
+      daily: 'weather_code,temperature_2m_max,temperature_2m_min,wind_speed_10m_max,wind_direction_10m_dominant,precipitation_probability_max',
       temperature_unit: tempUnit,
       wind_speed_unit: windUnit,
       forecast_days: 10,
@@ -335,11 +335,13 @@ function renderHourly(data) {
     div.className = 'hourly-item';
     const wind = Math.round(data.hourly.wind_speed_10m[idx]);
     const wdir = windDirection(data.hourly.wind_direction_10m[idx]);
+    const precip = data.hourly.precipitation_probability[idx] ?? 0;
 
     div.innerHTML = `
       <div class="hour">${i === 0 ? 'Now' : dt.toLocaleTimeString('en-US', { hour: 'numeric' })}</div>
       <div class="h-icon">${icon}</div>
       <div class="h-temp">${temp}°</div>
+      <div class="h-precip"><span class="material-icons">water_drop</span> ${precip}%</div>
       <div class="h-wind"><span class="material-icons">air</span> ${wind} ${wdir}</div>
     `;
     list.appendChild(div);
@@ -360,6 +362,7 @@ function renderDaily(data) {
     const low = Math.round(data.daily.temperature_2m_min[i]);
     const dWind = Math.round(data.daily.wind_speed_10m_max[i]);
     const dDir = windDirection(data.daily.wind_direction_10m_dominant[i]);
+    const dPrecip = data.daily.precipitation_probability_max[i] ?? 0;
 
     const dayName = i === 0
       ? 'Today'
@@ -372,6 +375,7 @@ function renderDaily(data) {
       <div class="daily-day">${dayName}<div class="daily-date">${dateStr}</div></div>
       <div class="daily-icon">${icon}</div>
       <div class="daily-temps"><span class="daily-high">${high}°</span><span class="daily-low">${low}°</span></div>
+      <div class="daily-precip"><span class="material-icons">water_drop</span> ${dPrecip}%</div>
       <div class="daily-wind"><span class="material-icons">air</span> ${dWind} ${windLabel()} ${dDir}</div>
     `;
     list.appendChild(div);

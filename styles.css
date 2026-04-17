@@ -292,6 +292,20 @@ header {
   font-weight: 600;
 }
 
+.hourly-item .h-precip {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  font-size: 11px;
+  color: var(--accent);
+  margin-top: 6px;
+}
+
+.hourly-item .h-precip .material-icons {
+  font-size: 14px;
+}
+
 .hourly-item .h-wind {
   display: flex;
   align-items: center;
@@ -310,17 +324,17 @@ header {
 .daily-list {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 12px;
 }
 
 .daily-row {
   display: grid;
-  grid-template-columns: 90px 40px 100px 1fr;
+  grid-template-columns: 90px 40px 100px 60px 1fr;
   align-items: center;
-  padding: 12px;
+  padding: 16px;
   background: rgba(255, 255, 255, 0.03);
   border-radius: 12px;
-  gap: 12px;
+  gap: 12px 24px;
 }
 
 .daily-day {
@@ -349,6 +363,19 @@ header {
 .daily-low {
   color: var(--text-muted);
   margin-left: 8px;
+}
+
+.daily-precip {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  font-size: 13px;
+  color: var(--accent);
+  white-space: nowrap;
+}
+
+.daily-precip .material-icons {
+  font-size: 16px;
 }
 
 .daily-wind {
