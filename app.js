@@ -36,7 +36,7 @@ function weatherInfo(code) {
 
 function windDirection(degrees) {
   const dirs = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE',
-                'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW'];
+    'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW'];
   return dirs[Math.round(degrees / 22.5) % 16];
 }
 
@@ -282,7 +282,7 @@ async function fetchWeather(lat, lon, name) {
     const params = new URLSearchParams({
       latitude: lat,
       longitude: lon,
-      current: 'temperature_2m,relative_humidity_2m,weather_code,wind_speed_10m,wind_direction_10m,dew_point_2m,uv_index,pressure_msl',
+      current: 'temperature_2m,relative_humidity_2m,weather_code,wind_speed_10m,wind_direction_10m,dew_point_2m,uv_index,pressure_msl,wind_gusts_10m',
       hourly: 'temperature_2m,weather_code,wind_speed_10m,wind_direction_10m,precipitation_probability,pressure_msl',
       daily: 'weather_code,temperature_2m_max,temperature_2m_min,wind_speed_10m_max,wind_direction_10m_dominant,precipitation_probability_max',
       temperature_unit: tempUnit,
@@ -326,7 +326,17 @@ function renderCurrent(data, name) {
   $('weatherDesc').textContent = desc;
   $('dewPoint').textContent = `${Math.round(c.dew_point_2m)}${unitLabel()}`;
   $('humidity').textContent = `${c.relative_humidity_2m}%`;
-  $('windSpeed').textContent = `${Math.round(c.wind_speed_10m)} ${windLabel()}`;
+  const windSpeed = Math.round(c.wind_speed_10m);
+  $('windSpeed').textContent = `${windSpeed} ${windLabel()}`;
+
+  const gusts = c.wind_gusts_10m;
+  const gustsSpan = $('windGusts');
+  if (gusts != null && gusts - windSpeed >= 6) {
+    gustsSpan.textContent = `Gusts: ${Math.round(gusts)} ${windLabel()}`;
+    gustsSpan.style.display = 'block';
+  } else {
+    gustsSpan.style.display = 'none';
+  }
   $('windDir').innerHTML = `${windDirection(c.wind_direction_10m)}<span class="wind-dir">${String(Math.round(c.wind_direction_10m)).padStart(3, '0')}°</span>`;
 
   // Pressure with 3-hour trend
