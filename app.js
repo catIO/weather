@@ -437,13 +437,22 @@ if ('serviceWorker' in navigator) {
 
 // ── Refresh on focus (if data is stale) ──
 let lastFetchTime = 0;
-const STALE_MS = 10 * 60 * 1000; // 10 minutes
+// Minimal throttle (1 minute) to avoid spamming the API on rapid tab/app switching
+const STALE_MS = 60 * 1000;
 
-document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible' && currentLocation && Date.now() - lastFetchTime > STALE_MS) {
+function refreshWeatherIfNeeded() {
+  if (currentLocation && Date.now() - lastFetchTime > STALE_MS) {
     fetchWeather(currentLocation.lat, currentLocation.lon, currentLocation.name);
   }
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') {
+    refreshWeatherIfNeeded();
+  }
 });
+
+window.addEventListener('focus', refreshWeatherIfNeeded);
 
 // ── Load last viewed or first saved location on startup ──
 (function init() {
