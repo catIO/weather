@@ -42,6 +42,42 @@
         </div>
       </div>
       <hr class="settings-divider" />
+      <div class="settings-header" style="margin-top:12px; margin-bottom:8px;">
+        <h2 style="font-size: 15px; font-weight: 600; color: var(--text);">Other Units</h2>
+      </div>
+      <div class="settings-group">
+        <div class="setting-row">
+          <span>Wind</span>
+          <select id="windUnit" class="settings-select">
+            <option value="mph">mph</option>
+            <option value="kmh">km/h</option>
+            <option value="ms">m/s</option>
+            <option value="kn">knots</option>
+          </select>
+        </div>
+        <div class="setting-row">
+          <span>Precipitation</span>
+          <select id="precipUnit" class="settings-select">
+            <option value="inch">in</option>
+            <option value="mm">mm</option>
+          </select>
+        </div>
+        <div class="setting-row">
+          <span>Pressure</span>
+          <select id="pressureUnit" class="settings-select">
+            <option value="inHg">inHg</option>
+            <option value="hPa">hPa</option>
+          </select>
+        </div>
+        <div class="setting-row">
+          <span>Distance</span>
+          <select id="distanceUnit" class="settings-select">
+            <option value="mi">mi</option>
+            <option value="km">km</option>
+          </select>
+        </div>
+      </div>
+      <hr class="settings-divider" />
       <div class="settings-header" style="margin-top:12px">
         <h2>Saved Locations</h2>
         <button id="saveLocationBtn" class="icon-btn" aria-label="Save current location"><span class="material-icons">add</span></button>
@@ -66,7 +102,7 @@
         <span id="currentDate"></span>
       </div>
       <div class="current-main">
-        <div class="current-temp">
+        <div class="current-temp interactive" id="weatherSummaryBtn" role="button" tabindex="0" aria-label="View activity summary" title="Click for upcoming activity summary">
           <span id="weatherIcon" class="weather-icon"></span>
           <span id="currentTemp"></span>
         </div>
@@ -116,6 +152,17 @@
     <footer class="attribution">
       Weather data by <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo</a>
     </footer>
+  </div>
+
+  <!-- Summary Modal -->
+  <div id="summaryModal" class="modal-overlay hidden">
+    <div class="modal-content card">
+      <div class="settings-header">
+        <h2>Activity Summary</h2>
+        <button id="closeSummary" class="icon-btn" aria-label="Close summary"><span class="material-icons">close</span></button>
+      </div>
+      <div id="summaryText" class="summary-text"></div>
+    </div>
   </div>
 
   <script src="app.js"></script>

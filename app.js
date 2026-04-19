@@ -74,11 +74,25 @@ const dailyEl = $('daily');
 const saveLocationBtn = $('saveLocationBtn');
 const locationsList = $('locationsList');
 
+const summaryModal = $('summaryModal');
+const closeSummaryBtn = $('closeSummary');
+const summaryText = $('summaryText');
+const weatherSummaryBtn = $('weatherSummaryBtn');
+let latestWeatherData = null;
+
 // ── Settings (localStorage) ──
 function loadSettings() {
   try {
-    return JSON.parse(localStorage.getItem('weather_settings')) || { unit: 'fahrenheit' };
-  } catch { return { unit: 'fahrenheit' }; }
+    return Object.assign({
+      unit: 'fahrenheit',
+      windUnit: 'mph',
+      precipUnit: 'inch',
+      pressureUnit: 'inHg',
+      distanceUnit: 'mi'
+    }, JSON.parse(localStorage.getItem('weather_settings')) || {});
+  } catch {
+    return { unit: 'fahrenheit', windUnit: 'mph', precipUnit: 'inch', pressureUnit: 'inHg', distanceUnit: 'mi' };
+  }
 }
 
 function saveSettings(settings) {
@@ -126,6 +140,20 @@ function initUnitToggle() {
         fetchWeather(currentLocation.lat, currentLocation.lon, currentLocation.name);
       }
     });
+  });
+
+  ['windUnit', 'precipUnit', 'pressureUnit', 'distanceUnit'].forEach(key => {
+    const select = $(key);
+    if (select) {
+      select.value = settings[key];
+      select.addEventListener('change', () => {
+        settings[key] = select.value;
+        saveSettings(settings);
+        if (currentLocation) {
+          fetchWeather(currentLocation.lat, currentLocation.lon, currentLocation.name);
+        }
+      });
+    }
   });
 }
 initUnitToggle();
@@ -191,6 +219,10 @@ searchInput.addEventListener('keydown', (e) => {
     e.preventDefault();
     suggestionsEl.classList.add('hidden');
     const q = searchInput.value.trim();
+    if (currentLocation && q === currentLocation.name) {
+      fetchWeather(currentLocation.lat, currentLocation.lon, currentLocation.name);
+      return;
+    }
     if (q.length >= 2) searchLocations(q, true);
   }
 });
@@ -198,6 +230,10 @@ searchInput.addEventListener('keydown', (e) => {
 searchBtn.addEventListener('click', () => {
   suggestionsEl.classList.add('hidden');
   const q = searchInput.value.trim();
+  if (currentLocation && q === currentLocation.name) {
+    fetchWeather(currentLocation.lat, currentLocation.lon, currentLocation.name);
+    return;
+  }
   if (q.length >= 2) searchLocations(q, true);
 });
 
@@ -216,7 +252,8 @@ geoBtn.addEventListener('click', () => {
 
 async function searchLocations(query, autoSelect = false) {
   try {
-    const url = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(query)}&count=5&language=en&format=json`;
+    const cityName = query.split(',')[0].trim();
+    const url = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(cityName)}&count=5&language=en&format=json`;
     const res = await fetch(url);
     const data = await res.json();
     if (!data.results || data.results.length === 0) {
@@ -225,9 +262,20 @@ async function searchLocations(query, autoSelect = false) {
       return;
     }
     if (autoSelect) {
-      const loc = data.results[0];
+      let selectedLoc = data.results[0];
+      if (query.includes(',')) {
+        const parts = query.toLowerCase().split(',').map(p => p.trim());
+        const match = data.results.find(r => {
+          const rStr = formatLocation(r).toLowerCase();
+          return parts.every(p => rStr.includes(p));
+        });
+        if (match) selectedLoc = match;
+      }
+
+      const loc = selectedLoc;
       suggestionsEl.classList.add('hidden');
-      searchInput.value = formatLocation(loc);
+      searchInput.value = '';
+      searchInput.blur();
       fetchWeather(loc.latitude, loc.longitude, formatLocation(loc));
       return;
     }
@@ -252,7 +300,8 @@ function renderSuggestions(results) {
     div.textContent = formatLocation(loc);
     div.addEventListener('click', () => {
       suggestionsEl.classList.add('hidden');
-      searchInput.value = formatLocation(loc);
+      searchInput.value = '';
+      searchInput.blur();
       fetchWeather(loc.latitude, loc.longitude, formatLocation(loc));
     });
     suggestionsEl.appendChild(div);
@@ -276,17 +325,19 @@ async function fetchWeather(lat, lon, name) {
   localStorage.setItem('weather_last_location', JSON.stringify(currentLocation));
 
   const tempUnit = settings.unit;
-  const windUnit = tempUnit === 'fahrenheit' ? 'mph' : 'kmh';
+  const windUnit = settings.windUnit;
+  const precipUnit = settings.precipUnit;
 
   try {
     const params = new URLSearchParams({
       latitude: lat,
       longitude: lon,
       current: 'temperature_2m,relative_humidity_2m,weather_code,wind_speed_10m,wind_direction_10m,dew_point_2m,uv_index,pressure_msl,wind_gusts_10m',
-      hourly: 'temperature_2m,weather_code,wind_speed_10m,wind_direction_10m,precipitation_probability,pressure_msl',
+      hourly: 'temperature_2m,weather_code,wind_speed_10m,wind_direction_10m,precipitation_probability,pressure_msl,wind_gusts_10m',
       daily: 'weather_code,temperature_2m_max,temperature_2m_min,wind_speed_10m_max,wind_direction_10m_dominant,precipitation_probability_max',
       temperature_unit: tempUnit,
       wind_speed_unit: windUnit,
+      precipitation_unit: precipUnit,
       forecast_days: 10,
       timezone: 'auto',
     });
@@ -294,6 +345,7 @@ async function fetchWeather(lat, lon, name) {
     const res = await fetch(`https://api.open-meteo.com/v1/forecast?${params}`);
     if (!res.ok) throw new Error('Weather API error');
     const data = await res.json();
+    latestWeatherData = data;
 
     renderCurrent(data, name);
     renderHourly(data);
@@ -308,7 +360,12 @@ async function fetchWeather(lat, lon, name) {
 
 // ── Rendering ──
 function unitLabel() { return settings.unit === 'fahrenheit' ? '°F' : '°C'; }
-function windLabel() { return settings.unit === 'fahrenheit' ? 'mph' : 'km/h'; }
+function windLabel() {
+  if (settings.windUnit === 'kmh') return 'km/h';
+  if (settings.windUnit === 'ms') return 'm/s';
+  if (settings.windUnit === 'kn') return 'knots';
+  return 'mph';
+}
 
 function renderCurrent(data, name) {
   const c = data.current;
@@ -340,9 +397,16 @@ function renderCurrent(data, name) {
   $('windDir').innerHTML = `${windDirection(c.wind_direction_10m)}<span class="wind-dir">${String(Math.round(c.wind_direction_10m)).padStart(3, '0')}°</span>`;
 
   // Pressure with 3-hour trend
-  const currentPressure = Math.round(c.pressure_msl);
+  let currentPressure = c.pressure_msl;
+  let pressureUnitLabel = 'hPa';
+  if (settings.pressureUnit === 'inHg') {
+    currentPressure = (currentPressure * 0.02953).toFixed(2);
+    pressureUnitLabel = 'inHg';
+  } else {
+    currentPressure = Math.round(currentPressure);
+  }
   const trend = pressureTrend(data);
-  $('pressure').innerHTML = `${currentPressure} hPa<span class="pressure-trend">${trend}</span>`;
+  $('pressure').innerHTML = `${currentPressure} ${pressureUnitLabel}<span class="pressure-trend">${trend}</span>`;
 
   $('uvIndex').textContent = c.uv_index != null ? Math.round(c.uv_index) : '—';
 
@@ -479,3 +543,101 @@ window.addEventListener('focus', refreshWeatherIfNeeded);
     fetchWeather(loc.lat, loc.lon, loc.name);
   }
 })();
+
+// ── Activity Summary ──
+function generateActivitySummary(data) {
+  const now = new Date();
+  const times = data.hourly.time;
+  let startIdx = times.findIndex((t) => new Date(t) >= now);
+  if (startIdx < 0) startIdx = 0;
+
+  const hoursToLook = 10;
+  const indices = [];
+  for (let i = 0; i < hoursToLook && (startIdx + i) < times.length; i++) {
+    indices.push(startIdx + i);
+  }
+
+  let maxWind = 0;
+  let maxGusts = 0;
+  let willRain = false;
+  let willSnow = false;
+  let willIce = false;
+  let minTemp = 1000;
+  let maxTemp = -1000;
+
+  indices.forEach(idx => {
+    const wind = data.hourly.wind_speed_10m[idx];
+    const gusts = data.hourly.wind_gusts_10m[idx] ?? 0;
+    const precipProb = data.hourly.precipitation_probability[idx] ?? 0;
+    const code = data.hourly.weather_code[idx];
+    const temp = data.hourly.temperature_2m[idx];
+
+    if (wind > maxWind) maxWind = wind;
+    if (gusts > maxGusts) maxGusts = gusts;
+    if (temp < minTemp) minTemp = temp;
+    if (temp > maxTemp) maxTemp = temp;
+
+    if (precipProb > 30) {
+      if ([71, 73, 75, 77, 85, 86].includes(code)) willSnow = true;
+      else if ([56, 57, 66, 67].includes(code)) willIce = true;
+      else if ([51, 53, 55, 61, 63, 65, 80, 81, 82, 95, 96, 99].includes(code)) willRain = true;
+    }
+    
+    const freezingTemp = settings.unit === 'fahrenheit' ? 32 : 0;
+    if (temp <= freezingTemp && (willRain || willSnow || precipProb > 30)) {
+      willIce = true;
+    }
+  });
+
+  const wLabel = windLabel();
+  const tLabel = unitLabel();
+  let summary = `Over the next ${hoursToLook} hours, temperatures will range from ${Math.round(minTemp)}${tLabel} to ${Math.round(maxTemp)}${tLabel}. `;
+
+  if (willIce) {
+    summary += "Freezing conditions with precipitation are expected, creating a high risk of ice. Watch out for slick or icy surfaces! ";
+  } else if (willSnow) {
+    summary += "Expect snow! Biking is likely not recommended unless you have specialized gear. ";
+  } else if (willRain) {
+    summary += "There is a solid chance of rain. If you're biking, be sure to pack rain gear. ";
+  } else {
+    summary += "No significant precipitation is expected. ";
+  }
+
+  // Activity thresholds based on common wind factors
+  // Using generic units for simplicity, but thresholds technically vary by mph vs kmh.
+  // We'll normalize to mph roughly for comparison if needed, but simple numerical thresholds work fine enough for a basic summary.
+  let windThreshold = settings.windUnit === 'kmh' ? 24 : (settings.windUnit === 'ms' ? 6 : 15);
+  let gustThreshold = settings.windUnit === 'kmh' ? 32 : (settings.windUnit === 'ms' ? 9 : 20);
+
+  if (maxGusts > gustThreshold) {
+    summary += `Winds will be quite gusty, peaking around ${Math.round(maxGusts)} ${wLabel}. This could make biking or other activities difficult. `;
+  } else if (maxWind > windThreshold) {
+    summary += `It will be breezy with sustained winds up to ${Math.round(maxWind)} ${wLabel}. `;
+  } else {
+    summary += `Winds should remain relatively calm, peaking at just ${Math.round(maxGusts)} ${wLabel} gusts, making it a great time for outdoor activities!`;
+  }
+
+  return summary;
+}
+
+if (weatherSummaryBtn) {
+  weatherSummaryBtn.addEventListener('click', () => {
+    if (!latestWeatherData) return;
+    summaryText.innerHTML = generateActivitySummary(latestWeatherData);
+    summaryModal.classList.remove('hidden');
+  });
+}
+
+if (closeSummaryBtn) {
+  closeSummaryBtn.addEventListener('click', () => {
+    summaryModal.classList.add('hidden');
+  });
+}
+
+if (summaryModal) {
+  summaryModal.addEventListener('click', (e) => {
+    if (e.target === summaryModal) {
+      summaryModal.classList.add('hidden');
+    }
+  });
+}
