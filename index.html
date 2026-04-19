@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -15,6 +16,7 @@
   <link rel="stylesheet" href="https://fonts.googleapis.com/icon?family=Material+Icons" />
   <link rel="stylesheet" href="styles.css" />
 </head>
+
 <body>
   <div id="app">
     <!-- Search -->
@@ -80,10 +82,11 @@
       <hr class="settings-divider" />
       <div class="settings-header" style="margin-top:12px">
         <h2>Saved Locations</h2>
-        <button id="saveLocationBtn" class="icon-btn" aria-label="Save current location"><span class="material-icons">add</span></button>
+        <button id="saveLocationBtn" class="icon-btn" aria-label="Save current location"><span
+            class="material-icons">add</span></button>
       </div>
       <div id="locationsList" class="locations-list">
-        <div class="empty-locations">Search for a city, then tap + to save it</div>
+        <div class="empty-locations">Search for a location, then tap + to save it</div>
       </div>
     </section>
 
@@ -95,6 +98,14 @@
     <!-- Error -->
     <div id="error" class="error hidden"></div>
 
+    <!-- Empty State -->
+    <div id="emptyState" class="empty-state">
+      <span class="material-icons empty-icon">cloud</span>
+      <h2>Welcome!</h2>
+      <h3>Search for a location above to get started</h3>
+      <p>Wishing you clear skies and fair winds.</p>
+    </div>
+
     <!-- Current Conditions -->
     <section id="current" class="card hidden">
       <div class="current-header">
@@ -102,7 +113,8 @@
         <span id="currentDate"></span>
       </div>
       <div class="current-main">
-        <div class="current-temp interactive" id="weatherSummaryBtn" role="button" tabindex="0" aria-label="View activity summary" title="Click for upcoming activity summary">
+        <div class="current-temp interactive" id="weatherSummaryBtn" role="button" tabindex="0"
+          aria-label="View activity summary" title="Click for upcoming activity summary">
           <span id="weatherIcon" class="weather-icon"></span>
           <span id="currentTemp"></span>
         </div>
@@ -159,7 +171,8 @@
     <div class="modal-content card">
       <div class="settings-header">
         <h2>Activity Summary</h2>
-        <button id="closeSummary" class="icon-btn" aria-label="Close summary"><span class="material-icons">close</span></button>
+        <button id="closeSummary" class="icon-btn" aria-label="Close summary"><span
+            class="material-icons">close</span></button>
       </div>
       <div id="summaryText" class="summary-text"></div>
     </div>
@@ -167,4 +180,5 @@
 
   <script src="app.js"></script>
 </body>
+
 </html>

@@ -71,6 +71,7 @@ const errorEl = $('error');
 const currentEl = $('current');
 const hourlyEl = $('hourly');
 const dailyEl = $('daily');
+const emptyStateEl = $('emptyState');
 const saveLocationBtn = $('saveLocationBtn');
 const locationsList = $('locationsList');
 
@@ -318,6 +319,7 @@ document.addEventListener('click', (e) => {
 
 // ── Weather fetching ──
 async function fetchWeather(lat, lon, name) {
+  emptyStateEl.classList.add('hidden');
   showLoading(true);
   hideError();
   hideWeather();
@@ -537,10 +539,11 @@ window.addEventListener('focus', refreshWeatherIfNeeded);
       fetchWeather(loc.lat, loc.lon, loc.name);
       return;
     } catch { /* fall through */ }
-  }
-  if (savedLocations.length > 0) {
+  } else if (savedLocations.length > 0) {
     const loc = savedLocations[0];
     fetchWeather(loc.lat, loc.lon, loc.name);
+  } else {
+    emptyStateEl.classList.remove('hidden');
   }
 })();
 
