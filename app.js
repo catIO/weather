@@ -457,6 +457,8 @@ function renderDaily(data) {
   list.innerHTML = '';
 
   const days = data.daily.time;
+  const hourlyTimes = data.hourly.time;
+
   for (let i = 0; i < days.length; i++) {
     const dt = new Date(days[i] + 'T00:00:00');
     const [icon] = weatherInfo(data.daily.weather_code[i]);
@@ -471,19 +473,84 @@ function renderDaily(data) {
       : dt.toLocaleDateString('en-US', { weekday: 'short' });
     const dateStr = dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 
+    const wrapper = document.createElement('div');
+    wrapper.className = 'daily-wrapper';
+
+    const coldThreshold = settings.unit === 'fahrenheit' ? 35 : 2;
+    const hotThreshold = settings.unit === 'fahrenheit' ? 85 : 30;
+    const lowClass = low < coldThreshold ? ' temp-cold' : '';
+    const highClass = high > hotThreshold ? ' temp-hot' : '';
+
     const div = document.createElement('div');
     div.className = 'daily-row';
+    if (i < 5) div.classList.add('daily-expandable');
     div.innerHTML = `
       <div class="daily-day">${dayName}<div class="daily-date">${dateStr}</div></div>
       <div class="daily-icon">${icon}</div>
-      <div class="daily-temps"><span class="daily-high">${high}°</span><span class="daily-low">${low}°</span></div>
+      <div class="daily-temps"><span class="daily-low${lowClass}">${low}°</span><span class="daily-high${highClass}">${high}°</span></div>
       <div class="daily-precip${dPrecip < 10 ? ' low-precip' : ''}"><span class="material-icons">water_drop</span> ${dPrecip}%</div>
-      <div class="daily-wind"><span class="material-icons">air</span> ${dWind} ${windLabel()} ${dDir}</div>
+      <div class="daily-wind"><span class="material-icons">air</span><span class="dw-speed">${dWind} ${windLabel()}</span><span class="dw-dir">${dDir}</span></div>
     `;
-    list.appendChild(div);
+
+    wrapper.appendChild(div);
+
+    if (i < 5) {
+      const detail = document.createElement('div');
+      detail.className = 'daily-hourly hidden';
+      wrapper.appendChild(detail);
+
+      div.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const isOpen = !detail.classList.contains('hidden');
+        // Close any other open panels
+        list.querySelectorAll('.daily-hourly').forEach((el) => el.classList.add('hidden'));
+        list.querySelectorAll('.daily-row').forEach((el) => el.classList.remove('daily-expanded'));
+        if (!isOpen) {
+          detail.classList.remove('hidden');
+          div.classList.add('daily-expanded');
+          if (!detail.dataset.loaded) {
+            renderDayHourly(detail, data, days[i]);
+            detail.dataset.loaded = '1';
+          }
+        }
+      });
+    }
+
+    list.appendChild(wrapper);
   }
 
   dailyEl.classList.remove('hidden');
+}
+
+function renderDayHourly(container, data, dayStr) {
+  const times = data.hourly.time;
+  const dayStart = dayStr + 'T00:00';
+  const dayEnd = dayStr + 'T23:00';
+  const scroll = document.createElement('div');
+  scroll.className = 'hourly-scroll';
+
+  for (let idx = 0; idx < times.length; idx++) {
+    if (times[idx] < dayStart || times[idx] > dayEnd) continue;
+    const dt = new Date(times[idx]);
+    const [icon] = weatherInfo(data.hourly.weather_code[idx]);
+    const temp = Math.round(data.hourly.temperature_2m[idx]);
+    const wind = Math.round(data.hourly.wind_speed_10m[idx]);
+    const wdir = windDirection(data.hourly.wind_direction_10m[idx]);
+    const precip = data.hourly.precipitation_probability[idx] ?? 0;
+
+    const div = document.createElement('div');
+    div.className = 'hourly-item';
+    div.innerHTML = `
+      <div class="hour">${dt.toLocaleTimeString('en-US', { hour: 'numeric' })}</div>
+      <div class="h-icon">${icon}</div>
+      <div class="h-temp">${temp}°</div>
+      <div class="h-precip${precip < 10 ? ' low-precip' : ''}"><span class="material-icons">water_drop</span> ${precip}%</div>
+      <div class="h-wind"><span class="material-icons">air</span> ${wind} ${wdir}</div>
+    `;
+    scroll.appendChild(div);
+  }
+
+  container.appendChild(scroll);
 }
 
 // ── Helpers ──
@@ -513,8 +580,8 @@ if ('serviceWorker' in navigator) {
 
 // ── Refresh on focus (if data is stale) ──
 let lastFetchTime = 0;
-// Minimal throttle (1 minute) to avoid spamming the API on rapid tab/app switching
-const STALE_MS = 60 * 1000;
+// Only refresh if data is more than 5 minutes old
+const STALE_MS = 5 * 60 * 1000;
 
 function refreshWeatherIfNeeded() {
   if (currentLocation && Date.now() - lastFetchTime > STALE_MS) {

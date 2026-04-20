@@ -373,6 +373,30 @@ header {
   gap: 12px 24px;
 }
 
+.daily-expandable {
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.daily-expandable:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.daily-expanded {
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 12px 12px 0 0;
+}
+
+.daily-hourly {
+  background: rgba(255, 255, 255, 0.02);
+  border-radius: 0 0 12px 12px;
+  padding: 12px;
+}
+
+.daily-hourly.hidden {
+  display: none;
+}
+
 .daily-day {
   font-weight: 500;
   min-width: 0;
@@ -394,11 +418,19 @@ header {
 
 .daily-high {
   font-weight: 600;
+  margin-left: 8px;
 }
 
 .daily-low {
   color: var(--text-muted);
-  margin-left: 8px;
+}
+
+.temp-cold {
+  color: #64b5f6;
+}
+
+.temp-hot {
+  color: #ef5350;
 }
 
 .daily-precip {
@@ -415,13 +447,23 @@ header {
 }
 
 .daily-wind {
-  display: flex;
+  display: grid;
+  grid-template-columns: 18px auto auto;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: end;
   gap: 4px;
   font-size: 13px;
   color: var(--text-muted);
   white-space: nowrap;
+}
+
+.dw-speed {
+  text-align: right;
+}
+
+.dw-dir {
+  text-align: left;
+  min-width: 28px;
 }
 
 .daily-wind .material-icons {
