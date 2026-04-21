@@ -324,6 +324,7 @@ async function fetchWeather(lat, lon, name) {
   hideError();
   hideWeather();
   currentLocation = { lat, lon, name };
+  lastFetchTime = Date.now();
   localStorage.setItem('weather_last_location', JSON.stringify(currentLocation));
 
   const tempUnit = settings.unit;
