@@ -466,7 +466,20 @@ function renderDaily(data) {
     const high = Math.round(data.daily.temperature_2m_max[i]);
     const low = Math.round(data.daily.temperature_2m_min[i]);
     const dWind = Math.round(data.daily.wind_speed_10m_max[i]);
-    const dDir = windDirection(data.daily.wind_direction_10m_dominant[i]);
+    // Find wind direction at the hour with peak wind speed for this day
+    const dayStart = days[i] + 'T00:00';
+    const dayEnd = days[i] + 'T23:00';
+    let peakWindSpeed = -1;
+    let peakWindDir = data.daily.wind_direction_10m_dominant[i];
+    for (let h = 0; h < hourlyTimes.length; h++) {
+      if (hourlyTimes[h] >= dayStart && hourlyTimes[h] <= dayEnd) {
+        if (data.hourly.wind_speed_10m[h] > peakWindSpeed) {
+          peakWindSpeed = data.hourly.wind_speed_10m[h];
+          peakWindDir = data.hourly.wind_direction_10m[h];
+        }
+      }
+    }
+    const dDir = windDirection(peakWindDir);
     const dPrecip = data.daily.precipitation_probability_max[i] ?? 0;
 
     const dayName = i === 0

@@ -365,12 +365,12 @@ header {
 
 .daily-row {
   display: grid;
-  grid-template-columns: 90px 40px 100px 60px 1fr;
+  grid-template-columns: 1fr auto auto auto auto;
   align-items: center;
   padding: 16px;
   background: rgba(255, 255, 255, 0.03);
   border-radius: 12px;
-  gap: 12px 24px;
+  gap: 12px 16px;
 }
 
 .daily-expandable {
@@ -482,6 +482,33 @@ header {
 
   #currentTemp {
     font-size: 48px;
+  }
+
+  .daily-row {
+    gap: 8px 10px;
+    padding: 12px 10px;
+  }
+
+  .daily-icon {
+    font-size: 24px;
+  }
+
+  .daily-precip,
+  .daily-wind {
+    font-size: 12px;
+  }
+
+  .daily-precip .material-icons,
+  .daily-wind .material-icons {
+    font-size: 14px;
+  }
+
+  .daily-day .daily-date {
+    font-size: 11px;
+  }
+
+  .dw-dir {
+    display: none;
   }
 }
 
