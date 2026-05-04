@@ -79,6 +79,7 @@ const summaryModal = $('summaryModal');
 const closeSummaryBtn = $('closeSummary');
 const summaryText = $('summaryText');
 const weatherSummaryBtn = $('weatherSummaryBtn');
+const refreshIndicatorEl = $('refreshIndicator');
 let latestWeatherData = null;
 
 // ── Settings (localStorage) ──
@@ -138,7 +139,7 @@ function initUnitToggle() {
       );
       // Re-fetch if we have a current location
       if (currentLocation) {
-        fetchWeather(currentLocation.lat, currentLocation.lon, currentLocation.name);
+        fetchWeather(currentLocation.lat, currentLocation.lon, currentLocation.name, { silent: true });
       }
     });
   });
@@ -151,7 +152,7 @@ function initUnitToggle() {
         settings[key] = select.value;
         saveSettings(settings);
         if (currentLocation) {
-          fetchWeather(currentLocation.lat, currentLocation.lon, currentLocation.name);
+          fetchWeather(currentLocation.lat, currentLocation.lon, currentLocation.name, { silent: true });
         }
       });
     }
@@ -318,11 +319,16 @@ document.addEventListener('click', (e) => {
 });
 
 // ── Weather fetching ──
-async function fetchWeather(lat, lon, name) {
+async function fetchWeather(lat, lon, name, { silent = false } = {}) {
+  const hasData = silent && latestWeatherData;
   emptyStateEl.classList.add('hidden');
-  showLoading(true);
-  hideError();
-  hideWeather();
+  if (hasData) {
+    showRefreshIndicator(true);
+  } else {
+    showLoading(true);
+    hideError();
+    hideWeather();
+  }
   currentLocation = { lat, lon, name };
   lastFetchTime = Date.now();
   localStorage.setItem('weather_last_location', JSON.stringify(currentLocation));
@@ -355,9 +361,12 @@ async function fetchWeather(lat, lon, name) {
     renderDaily(data);
     lastFetchTime = Date.now();
   } catch {
-    showError('Failed to fetch weather data. Please try again.');
+    if (!hasData) {
+      showError('Failed to fetch weather data. Please try again.');
+    }
   } finally {
     showLoading(false);
+    showRefreshIndicator(false);
   }
 }
 
@@ -418,7 +427,7 @@ function renderCurrent(data, name) {
 
 function renderHourly(data) {
   const list = $('hourlyList');
-  list.innerHTML = '';
+  const fragment = document.createDocumentFragment();
 
   const now = new Date();
   const times = data.hourly.time;
@@ -447,16 +456,25 @@ function renderHourly(data) {
       <div class="h-precip${precip < 10 ? ' low-precip' : ''}"><span class="material-icons">water_drop</span> ${precip}%</div>
       <div class="h-wind"><span class="material-icons">air</span> ${wind} ${wdir}</div>
     `;
-    list.appendChild(div);
+    fragment.appendChild(div);
   }
 
+  list.replaceChildren(fragment);
   hourlyEl.classList.remove('hidden');
 }
 
 function renderDaily(data) {
   const list = $('dailyList');
-  list.innerHTML = '';
 
+  // Capture which day index is currently expanded before rebuilding
+  const expandedRow = list.querySelector('.daily-row.daily-expanded');
+  let expandedIdx = -1;
+  if (expandedRow) {
+    const wrapper = expandedRow.closest('.daily-wrapper');
+    expandedIdx = Array.from(list.children).indexOf(wrapper);
+  }
+
+  const fragment = document.createDocumentFragment();
   const days = data.daily.time;
   const hourlyTimes = data.hourly.time;
 
@@ -530,7 +548,24 @@ function renderDaily(data) {
       });
     }
 
-    list.appendChild(wrapper);
+    fragment.appendChild(wrapper);
+  }
+
+  list.replaceChildren(fragment);
+
+  // Re-open the previously expanded day with fresh data
+  if (expandedIdx >= 0) {
+    const wrappers = list.querySelectorAll('.daily-wrapper');
+    if (wrappers[expandedIdx]) {
+      const row = wrappers[expandedIdx].querySelector('.daily-row.daily-expandable');
+      const detail = wrappers[expandedIdx].querySelector('.daily-hourly');
+      if (row && detail) {
+        detail.classList.remove('hidden');
+        row.classList.add('daily-expanded');
+        renderDayHourly(detail, data, days[expandedIdx]);
+        detail.dataset.loaded = '1';
+      }
+    }
   }
 
   dailyEl.classList.remove('hidden');
@@ -587,6 +622,10 @@ function hideWeather() {
   dailyEl.classList.add('hidden');
 }
 
+function showRefreshIndicator(show) {
+  refreshIndicatorEl.classList.toggle('hidden', !show);
+}
+
 // ── Service Worker Registration ──
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('sw.js');
@@ -599,7 +638,7 @@ const STALE_MS = 5 * 60 * 1000;
 
 function refreshWeatherIfNeeded() {
   if (currentLocation && Date.now() - lastFetchTime > STALE_MS) {
-    fetchWeather(currentLocation.lat, currentLocation.lon, currentLocation.name);
+    fetchWeather(currentLocation.lat, currentLocation.lon, currentLocation.name, { silent: true });
   }
 }
 
