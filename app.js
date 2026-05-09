@@ -341,7 +341,7 @@ async function fetchWeather(lat, lon, name, { silent = false } = {}) {
     const params = new URLSearchParams({
       latitude: lat,
       longitude: lon,
-      current: 'temperature_2m,relative_humidity_2m,weather_code,wind_speed_10m,wind_direction_10m,dew_point_2m,uv_index,pressure_msl,wind_gusts_10m',
+      current: 'temperature_2m,relative_humidity_2m,weather_code,wind_speed_10m,wind_direction_10m,dew_point_2m,uv_index,pressure_msl,wind_gusts_10m,precipitation',
       hourly: 'temperature_2m,weather_code,wind_speed_10m,wind_direction_10m,precipitation_probability,pressure_msl,wind_gusts_10m',
       daily: 'weather_code,temperature_2m_max,temperature_2m_min,wind_speed_10m_max,wind_direction_10m_dominant,precipitation_probability_max',
       temperature_unit: tempUnit,
@@ -381,7 +381,14 @@ function windLabel() {
 
 function renderCurrent(data, name) {
   const c = data.current;
-  const [icon, desc] = weatherInfo(c.weather_code);
+  let code = c.weather_code;
+
+  // Fallback: If it's raining but the code is just cloudy/overcast, adjust it
+  if (c.precipitation > 0 && code <= 3) {
+    code = 61; // Slight rain
+  }
+
+  const [icon, desc] = weatherInfo(code);
 
   $('cityName').textContent = name;
   const now = new Date();
