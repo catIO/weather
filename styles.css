@@ -13,7 +13,79 @@
   --text-muted: #8888aa;
   --border: #2a2a4a;
   --danger: #ef5350;
+  --storm: #ff9800;
+  --storm-bg: rgba(255, 152, 0, 0.1);
+  --storm-border: rgba(255, 152, 0, 0.4);
+  --storm-severe: #f44336;
+  --storm-severe-bg: rgba(244, 67, 54, 0.12);
+  --storm-severe-border: rgba(244, 67, 54, 0.45);
 }
+
+/* Thunderstorm Alert Banner */
+.storm-alert {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 0 0 16px;
+  padding: 12px 16px;
+  border-radius: 12px;
+  background: var(--storm-bg);
+  border: 1px solid var(--storm-border);
+  animation: storm-pulse 2.5s ease-in-out infinite;
+}
+
+.storm-alert.storm-severe {
+  background: var(--storm-severe-bg);
+  border-color: var(--storm-severe-border);
+}
+
+.storm-alert.hidden {
+  display: none;
+}
+
+@keyframes storm-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.75; }
+}
+
+.storm-alert-icon {
+  font-size: 28px;
+  line-height: 1;
+  flex-shrink: 0;
+  filter: drop-shadow(0 0 6px var(--storm));
+}
+
+.storm-alert.storm-severe .storm-alert-icon {
+  filter: drop-shadow(0 0 8px var(--storm-severe));
+}
+
+.storm-alert-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.storm-alert-body strong {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--storm);
+  letter-spacing: 0.3px;
+}
+
+.storm-alert.storm-severe .storm-alert-body strong {
+  color: var(--storm-severe);
+}
+
+.storm-alert-body span {
+  font-size: 13px;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+/* CAPE value coloring */
+.cape-low  { color: var(--text-muted); }
+.cape-mod  { color: var(--storm); }
+.cape-high { color: var(--storm-severe); }
 
 body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;

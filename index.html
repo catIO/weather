@@ -117,11 +117,19 @@
       </div>
       <div class="current-main">
         <div class="current-temp interactive" id="weatherSummaryBtn" role="button" tabindex="0"
-          aria-label="View activity summary" title="Click for upcoming activity summary">
+          aria-label="View activity outlook" title="Click for upcoming activity outlook">
           <span id="weatherIcon" class="weather-icon"></span>
           <span id="currentTemp"></span>
         </div>
         <span id="weatherDesc" class="weather-desc"></span>
+      </div>
+      <!-- Thunderstorm Alert -->
+      <div id="stormAlert" class="storm-alert hidden">
+        <span id="stormAlertIcon" class="storm-alert-icon">⚡</span>
+        <div class="storm-alert-body">
+          <strong id="stormAlertTitle"></strong>
+          <span id="stormAlertDetail"></span>
+        </div>
       </div>
       <div class="current-details">
         <div class="detail">
@@ -173,7 +181,7 @@
   <div id="summaryModal" class="modal-overlay hidden">
     <div class="modal-content card">
       <div class="settings-header">
-        <h2>Activity Summary</h2>
+        <h2>Activity Outlook</h2>
         <button id="closeSummary" class="icon-btn" aria-label="Close summary"><span
             class="material-icons">close</span></button>
       </div>

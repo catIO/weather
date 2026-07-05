@@ -34,6 +34,16 @@ function weatherInfo(code) {
   return WMO_CODES[code] || ['❓', 'Unknown'];
 }
 
+function getHourlyIcon(code, precipProb, cape) {
+  if ([95, 96, 99].includes(code)) {
+    return '⛈️';
+  }
+  if (cape >= 500 && precipProb >= 30) {
+    return '⛈️';
+  }
+  return weatherInfo(code)[0];
+}
+
 function windDirection(degrees) {
   const dirs = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE',
     'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW'];
@@ -80,6 +90,10 @@ const closeSummaryBtn = $('closeSummary');
 const summaryText = $('summaryText');
 const weatherSummaryBtn = $('weatherSummaryBtn');
 const refreshIndicatorEl = $('refreshIndicator');
+const stormAlertEl = $('stormAlert');
+const stormAlertIconEl = $('stormAlertIcon');
+const stormAlertTitleEl = $('stormAlertTitle');
+const stormAlertDetailEl = $('stormAlertDetail');
 let latestWeatherData = null;
 
 // ── Settings (localStorage) ──
@@ -342,7 +356,8 @@ async function fetchWeather(lat, lon, name, { silent = false } = {}) {
       latitude: lat,
       longitude: lon,
       current: 'temperature_2m,relative_humidity_2m,weather_code,wind_speed_10m,wind_direction_10m,dew_point_2m,uv_index,pressure_msl,wind_gusts_10m,precipitation',
-      hourly: 'temperature_2m,weather_code,wind_speed_10m,wind_direction_10m,precipitation_probability,pressure_msl,wind_gusts_10m',
+      hourly: 'temperature_2m,weather_code,wind_speed_10m,wind_direction_10m,precipitation_probability,pressure_msl,wind_gusts_10m,cape',
+      minutely_15: 'lightning_potential,cape,weather_code',
       daily: 'weather_code,temperature_2m_max,temperature_2m_min,wind_speed_10m_max,wind_direction_10m_dominant,precipitation_probability_max',
       temperature_unit: tempUnit,
       wind_speed_unit: windUnit,
@@ -429,7 +444,90 @@ function renderCurrent(data, name) {
 
   $('uvIndex').textContent = c.uv_index != null ? Math.round(c.uv_index) : '—';
 
+  renderStormAlert(data);
+
   currentEl.classList.remove('hidden');
+}
+function renderStormAlert(data) {
+  const now = new Date();
+  const m15Times = data.minutely_15?.time ?? [];
+  const lpiArr = data.minutely_15?.lightning_potential ?? [];
+  const capeM15 = data.minutely_15?.cape ?? [];
+  const codeM15 = data.minutely_15?.weather_code ?? [];
+
+  // Find current + next 2 hours in minutely_15 (8 intervals × 15 min = 2 hrs)
+  let m15Start = m15Times.findIndex((t) => new Date(t) >= now);
+  if (m15Start < 0) m15Start = 0;
+  const m15Slice = Math.min(8, m15Times.length - m15Start);
+
+  let maxLPI = 0;
+  let maxCapeM15 = 0;
+  let stormCodeActive = false;
+
+  for (let i = 0; i < m15Slice; i++) {
+    const idx = m15Start + i;
+    if (lpiArr[idx] != null && lpiArr[idx] > maxLPI) maxLPI = lpiArr[idx];
+    if (capeM15[idx] != null && capeM15[idx] > maxCapeM15) maxCapeM15 = capeM15[idx];
+    if ([95, 96, 99].includes(codeM15[idx])) stormCodeActive = true;
+  }
+
+  // Also check current WMO code
+  const currentCode = data.current.weather_code;
+  if ([95, 96, 99].includes(currentCode)) stormCodeActive = true;
+
+  // Determine CAPE from hourly for next 3 hours
+  const hourTimes = data.hourly?.time ?? [];
+  const capeHourly = data.hourly?.cape ?? [];
+  let hourStart = hourTimes.findIndex((t) => new Date(t) >= now);
+  if (hourStart < 0) hourStart = 0;
+  let maxCapeHourly = 0;
+  for (let i = 0; i < 3 && (hourStart + i) < capeHourly.length; i++) {
+    const v = capeHourly[hourStart + i] ?? 0;
+    if (v > maxCapeHourly) maxCapeHourly = v;
+  }
+  const maxCape = Math.max(maxCapeM15, maxCapeHourly);
+
+  // Determine severity
+  // severe: active storm code OR LPI > 0 + CAPE > 1000
+  // warning: LPI > 0 OR CAPE > 1000
+  // watch: CAPE > 500
+  const isSevere = stormCodeActive || (maxLPI > 0 && maxCape > 1000);
+  const isWarning = !isSevere && (maxLPI > 0 || maxCape > 1000);
+  const isWatch = !isSevere && !isWarning && maxCape > 500;
+
+  // Hide alert if no signal
+  if (!isSevere && !isWarning && !isWatch) {
+    stormAlertEl.classList.add('hidden');
+    stormAlertEl.classList.remove('storm-severe');
+    return;
+  }
+
+  stormAlertEl.classList.remove('hidden');
+  stormAlertEl.classList.toggle('storm-severe', isSevere);
+
+  if (isSevere) {
+    stormAlertIconEl.style.display = 'block';
+    stormAlertTitleEl.textContent = stormCodeActive
+      ? (currentCode === 99 ? 'Thunderstorm with Heavy Hail' : currentCode === 96 ? 'Thunderstorm with Hail' : 'Thunderstorm Active')
+      : 'Severe Storm Risk';
+    const details = [];
+    if (maxLPI > 0) details.push(`Lightning potential: ${maxLPI.toFixed(1)}`);
+    if (maxCape > 0) details.push(`CAPE: ${Math.round(maxCape)} J/kg`);
+    stormAlertDetailEl.textContent = details.join(' · ') || 'Dangerous conditions — stay indoors.';
+  } else if (isWarning) {
+    stormAlertIconEl.style.display = 'block';
+    stormAlertTitleEl.textContent = 'Thunderstorm Warning';
+    const details = [];
+    if (maxLPI > 0) details.push(`Lightning potential: ${maxLPI.toFixed(1)}`);
+    if (maxCape > 0) details.push(`CAPE: ${Math.round(maxCape)} J/kg`);
+    stormAlertDetailEl.textContent = details.join(' · ') || 'Storm conditions likely in the next 2 hours.';
+  } else {
+    stormAlertIconEl.style.display = 'none';
+    stormAlertTitleEl.textContent = 'Thunderstorm Watch';
+    stormAlertDetailEl.textContent = `CAPE: ${Math.round(maxCape)} J/kg — atmospheric instability elevated. Storms possible.`;
+  }
+
+
 }
 
 function renderHourly(data) {
@@ -447,14 +545,16 @@ function renderHourly(data) {
   for (let i = 0; i < count; i++) {
     const idx = startIdx + i;
     const dt = new Date(times[idx]);
-    const [icon] = weatherInfo(data.hourly.weather_code[idx]);
+    const precip = data.hourly.precipitation_probability[idx] ?? 0;
+    const cape = data.hourly.cape?.[idx] ?? 0;
+    const code = data.hourly.weather_code[idx];
+    const icon = getHourlyIcon(code, precip, cape);
     const temp = Math.round(data.hourly.temperature_2m[idx]);
 
     const div = document.createElement('div');
     div.className = 'hourly-item';
     const wind = Math.round(data.hourly.wind_speed_10m[idx]);
     const wdir = windDirection(data.hourly.wind_direction_10m[idx]);
-    const precip = data.hourly.precipitation_probability[idx] ?? 0;
 
     div.innerHTML = `
       <div class="hour">${i === 0 ? 'Now' : dt.toLocaleTimeString('en-US', { hour: 'numeric' })}</div>
@@ -588,11 +688,13 @@ function renderDayHourly(container, data, dayStr) {
   for (let idx = 0; idx < times.length; idx++) {
     if (times[idx] < dayStart || times[idx] > dayEnd) continue;
     const dt = new Date(times[idx]);
-    const [icon] = weatherInfo(data.hourly.weather_code[idx]);
+    const precip = data.hourly.precipitation_probability[idx] ?? 0;
+    const cape = data.hourly.cape?.[idx] ?? 0;
+    const code = data.hourly.weather_code[idx];
+    const icon = getHourlyIcon(code, precip, cape);
     const temp = Math.round(data.hourly.temperature_2m[idx]);
     const wind = Math.round(data.hourly.wind_speed_10m[idx]);
     const wdir = windDirection(data.hourly.wind_direction_10m[idx]);
-    const precip = data.hourly.precipitation_probability[idx] ?? 0;
 
     const div = document.createElement('div');
     div.className = 'hourly-item';
@@ -674,8 +776,8 @@ window.addEventListener('focus', refreshWeatherIfNeeded);
   }
 })();
 
-// ── Activity Summary ──
-function generateActivitySummary(data) {
+// ── Activity Outlook ──
+function generateActivityOutlook(data) {
   const now = new Date();
   const times = data.hourly.time;
   let startIdx = times.findIndex((t) => new Date(t) >= now);
@@ -692,8 +794,14 @@ function generateActivitySummary(data) {
   let willRain = false;
   let willSnow = false;
   let willIce = false;
+  let willStorm = false;
+  let willHail = false;
+  let maxCape = 0;
   let minTemp = 1000;
   let maxTemp = -1000;
+
+  let peakWindIdx = indices[0];
+  let peakWindSpeedForDir = -1;
 
   indices.forEach(idx => {
     const wind = data.hourly.wind_speed_10m[idx];
@@ -701,11 +809,21 @@ function generateActivitySummary(data) {
     const precipProb = data.hourly.precipitation_probability[idx] ?? 0;
     const code = data.hourly.weather_code[idx];
     const temp = data.hourly.temperature_2m[idx];
+    const cape = data.hourly.cape?.[idx] ?? 0;
 
     if (wind > maxWind) maxWind = wind;
     if (gusts > maxGusts) maxGusts = gusts;
     if (temp < minTemp) minTemp = temp;
     if (temp > maxTemp) maxTemp = temp;
+    if (cape > maxCape) maxCape = cape;
+
+    if (wind > peakWindSpeedForDir) {
+      peakWindSpeedForDir = wind;
+      peakWindIdx = idx;
+    }
+
+    if ([95, 96, 99].includes(code)) willStorm = true;
+    if ([96, 99].includes(code)) willHail = true;
 
     if (precipProb > 30) {
       if ([71, 73, 75, 77, 85, 86].includes(code)) willSnow = true;
@@ -721,39 +839,180 @@ function generateActivitySummary(data) {
 
   const wLabel = windLabel();
   const tLabel = unitLabel();
-  let summary = `Over the next ${hoursToLook} hours, temperatures will range from ${Math.round(minTemp)}${tLabel} to ${Math.round(maxTemp)}${tLabel}. `;
+  const peakWindDirDeg = data.hourly.wind_direction_10m[peakWindIdx];
+  const peakWindDirStr = windDirection(peakWindDirDeg);
+  
+  let html = `<div style="display:flex; flex-direction:column; gap:16px;">`;
 
-  if (willIce) {
-    summary += "Freezing conditions with precipitation are expected, creating a high risk of ice. Watch out for slick or icy surfaces! ";
-  } else if (willSnow) {
-    summary += "Expect snow! Biking is likely not recommended unless you have specialized gear. ";
-  } else if (willRain) {
-    summary += "There is a solid chance of rain. If you're biking, be sure to pack rain gear. ";
-  } else {
-    summary += "No significant precipitation is expected. ";
+  // 1. Temperature range & Extreme temperatures
+  const isFahrenheit = settings.unit === 'fahrenheit';
+  const hotThreshold = isFahrenheit ? 95 : 35;
+  const warmThreshold = isFahrenheit ? 85 : 30;
+  const coldThreshold = isFahrenheit ? 32 : 0;
+  const deepFreezeThreshold = isFahrenheit ? 15 : -10;
+
+  let tempStatus = `Lows of <strong>${Math.round(minTemp)}${tLabel}</strong> and highs of <strong>${Math.round(maxTemp)}${tLabel}</strong>.`;
+  let tempAlert = "";
+  if (maxTemp >= hotThreshold) {
+    tempAlert = `<div style="font-size:14px; line-height:1.5; color:var(--text-muted); background:var(--storm-severe-bg); border:1px solid var(--storm-severe-border); padding:10px 12px; border-radius:8px; margin-top:8px;">
+      <strong style="color: var(--storm-severe);">Extreme Heat Warning:</strong> Peak of ${Math.round(maxTemp)}${tLabel}.
+    </div>`;
+  } else if (minTemp <= deepFreezeThreshold) {
+    tempAlert = `<div style="font-size:14px; line-height:1.5; color:var(--text-muted); background:rgba(79, 195, 247, 0.05); border:1px solid rgba(79, 195, 247, 0.2); padding:10px 12px; border-radius:8px; margin-top:8px;">
+      <strong style="color: var(--accent);">Severe Cold Warning:</strong> Lows around ${Math.round(minTemp)}${tLabel}.
+    </div>`;
+  } else if (minTemp <= coldThreshold) {
+    tempAlert = `<div style="font-size:14px; line-height:1.5; color:var(--text-muted); background:rgba(255, 255, 255, 0.02); border:1px solid var(--border); padding:10px 12px; border-radius:8px; margin-top:8px;">
+      <strong style="color: var(--text-muted);">Freezing Conditions:</strong> Lows dropping below freezing (${Math.round(minTemp)}${tLabel}).
+    </div>`;
   }
 
-  // Activity thresholds based on common wind factors
-  // Using generic units for simplicity, but thresholds technically vary by mph vs kmh.
-  // We'll normalize to mph roughly for comparison if needed, but simple numerical thresholds work fine enough for a basic summary.
+  html += `<div>
+    <h3 style="margin:0 0 6px; font-size:12px; text-transform:uppercase; color:var(--text-muted); letter-spacing:0.5px;">Temperature Forecast</h3>
+    <div style="font-size:15px; line-height:1.4;">${tempStatus}</div>
+    ${tempAlert}
+  </div>`;
+
+  // 2. Storm & Precipitation Risk
+  let precipText = "";
+  let precipSeverity = "none"; // 'severe', 'warning', 'watch', 'none'
+  
+  const hasHighInstability = maxCape >= 1000;
+  const hasModerateInstability = maxCape >= 500 && maxCape < 1000;
+  const precipProbMax = indices.reduce((max, idx) => Math.max(max, data.hourly.precipitation_probability[idx] ?? 0), 0);
+
+  if (willStorm || (hasHighInstability && (willRain || precipProbMax >= 30))) {
+    precipSeverity = "severe";
+    const hailNote = willHail ? ' Hail is possible.' : '';
+    precipText = `<strong style="color: var(--storm-severe);">Thunderstorm Threat:</strong> Active storm conditions expected in the next ${hoursToLook} hours.${hailNote} Extreme atmospheric instability (CAPE: ${Math.round(maxCape)} J/kg) detected.`;
+  } else if (hasModerateInstability && (willRain || precipProbMax >= 30)) {
+    precipSeverity = "warning";
+    precipText = `<strong style="color: var(--storm);">Storm Potential:</strong> Elevated instability (CAPE: ${Math.round(maxCape)} J/kg) coupled with moisture creates a strong chance of convective storm development.`;
+  } else if (willIce) {
+    precipSeverity = "severe";
+    precipText = `<strong style="color: var(--storm-severe);">Freezing Rain / Ice Alert:</strong> Icy precipitation expected with high danger of black ice on roads and pathways.`;
+  } else if (willSnow) {
+    precipSeverity = "warning";
+    precipText = `<strong style="color: var(--storm);">Snow Forecast:</strong> Snowfall is expected in this window.`;
+  } else if (willRain) {
+    precipSeverity = "watch";
+    precipText = `<strong style="color: var(--accent);">Rain Forecast:</strong> Steady rain is expected.`;
+  } else if (hasHighInstability) {
+    precipSeverity = "warning";
+    precipText = `<strong style="color: var(--storm);">High Instability:</strong> The atmosphere is highly unstable (CAPE: ${Math.round(maxCape)} J/kg). While dry now, any storm cells that form are expected to escalate rapidly.`;
+  } else {
+    precipText = `No significant rain, snow, or storm activity is expected.`;
+  }
+
+  let precipBg = "transparent";
+  let precipBorder = "none";
+  let precipPadding = "0";
+  let precipRadius = "0";
+
+  if (precipSeverity === "severe") {
+    precipBg = "var(--storm-severe-bg)";
+    precipBorder = "1px solid var(--storm-severe-border)";
+    precipPadding = "10px 12px";
+    precipRadius = "8px";
+  } else if (precipSeverity === "warning") {
+    precipBg = "var(--storm-bg)";
+    precipBorder = "1px solid var(--storm-border)";
+    precipPadding = "10px 12px";
+    precipRadius = "8px";
+  } else if (precipSeverity === "watch") {
+    precipBg = "rgba(79, 195, 247, 0.05)";
+    precipBorder = "1px solid rgba(79, 195, 247, 0.2)";
+    precipPadding = "10px 12px";
+    precipRadius = "8px";
+  }
+
+  html += `<div>
+    <h3 style="margin:0 0 6px; font-size:12px; text-transform:uppercase; color:var(--text-muted); letter-spacing:0.5px;">Weather Hazards</h3>
+    <div style="font-size:14px; line-height:1.5; color:var(--text-muted); background:${precipBg}; border:${precipBorder}; padding:${precipPadding}; border-radius:${precipRadius};">${precipText}</div>
+  </div>`;
+
+  // 3. Wind & Activity Recommendation
+  let windText = "";
   let windThreshold = settings.windUnit === 'kmh' ? 24 : (settings.windUnit === 'ms' ? 6 : 15);
   let gustThreshold = settings.windUnit === 'kmh' ? 32 : (settings.windUnit === 'ms' ? 9 : 20);
 
   if (maxGusts > gustThreshold) {
-    summary += `Winds will be quite gusty, peaking around ${Math.round(maxGusts)} ${wLabel}. This could make biking or other activities difficult. `;
+    windText = `Wind gusts up to <strong>${Math.round(maxGusts)} ${wLabel}</strong> from the <strong>${peakWindDirStr}</strong>.`;
   } else if (maxWind > windThreshold) {
-    summary += `It will be breezy with sustained winds up to ${Math.round(maxWind)} ${wLabel}. `;
+    windText = `Sustained winds up to <strong>${Math.round(maxWind)} ${wLabel}</strong> from the <strong>${peakWindDirStr}</strong>.`;
   } else {
-    summary += `Winds should remain relatively calm, peaking at just ${Math.round(maxGusts)} ${wLabel} gusts, making it a great time for outdoor activities!`;
+    windText = `Calm winds peaking at just <strong>${Math.round(maxGusts)} ${wLabel}</strong> (${peakWindDirStr}).`;
   }
 
-  return summary;
+  // Final overall score/recommendation for outdoor sports/biking
+  let rating = "Great";
+  let reason = "Calm winds, pleasant temperatures, and clear skies.";
+  let ratingColor = "#66bb6a"; // Green
+
+  const reasons = [];
+
+  if (precipSeverity === "severe") {
+    if (willStorm) reasons.push("active thunderstorms");
+    else if (willIce) reasons.push("freezing ice conditions");
+    else reasons.push("severe weather hazards");
+  } else if (precipSeverity === "warning") {
+    if (willSnow) reasons.push("snowfall");
+    else if (hasModerateInstability || hasHighInstability) reasons.push("convective storm potential");
+    else reasons.push("unfavorable precipitation");
+  } else if (precipSeverity === "watch") {
+    if (willRain) reasons.push("rain showers");
+    else if (hasHighInstability) reasons.push("atmospheric instability");
+  }
+
+  if (maxTemp >= hotThreshold) {
+    reasons.push("dangerous extreme heat");
+  } else if (maxTemp >= warmThreshold) {
+    reasons.push("warm temperatures");
+  }
+
+  if (minTemp <= deepFreezeThreshold) {
+    reasons.push("dangerous severe cold");
+  } else if (minTemp <= coldThreshold) {
+    reasons.push("freezing temperatures");
+  }
+
+  if (maxGusts > gustThreshold) {
+    reasons.push("gusty winds");
+  } else if (maxWind > windThreshold) {
+    reasons.push("breezy winds");
+  }
+
+  if (precipSeverity === "severe" || maxTemp >= hotThreshold || minTemp <= deepFreezeThreshold) {
+    rating = "Dangerous";
+    ratingColor = "var(--storm-severe)";
+    reason = `Dangerous conditions due to ${reasons.join(' and ')}.`;
+  } else if (precipSeverity === "warning" || maxGusts > gustThreshold) {
+    rating = "Poor";
+    ratingColor = "var(--storm)";
+    reason = `Unfavorable weather due to ${reasons.join(' and ')}.`;
+  } else if (precipSeverity === "watch" || maxWind > windThreshold || maxTemp >= warmThreshold || minTemp <= coldThreshold) {
+    rating = "Fair";
+    ratingColor = "var(--accent)";
+    reason = `Moderate conditions due to ${reasons.join(' and ')}.`;
+  }
+
+  html += `<div>
+    <h3 style="margin:0 0 6px; font-size:12px; text-transform:uppercase; color:var(--text-muted); letter-spacing:0.5px;">Activity Rating</h3>
+    <div style="display:flex; align-items:center; gap:8px; margin-bottom:6px;">
+      <span style="background:${ratingColor}; color:#0f0f23; font-size:11px; font-weight:700; text-transform:uppercase; padding:3px 8px; border-radius:4px; letter-spacing:0.5px;">${rating}</span>
+      <span style="font-size:13px; color:var(--text-muted);">${windText}</span>
+    </div>
+    <div style="font-size:14px; line-height:1.4; color:var(--text);">${reason}</div>
+  </div>`;
+
+  html += `</div>`;
+  return html;
 }
 
 if (weatherSummaryBtn) {
   weatherSummaryBtn.addEventListener('click', () => {
     if (!latestWeatherData) return;
-    summaryText.innerHTML = generateActivitySummary(latestWeatherData);
+    summaryText.innerHTML = generateActivityOutlook(latestWeatherData);
     summaryModal.classList.remove('hidden');
   });
 }
