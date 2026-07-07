@@ -334,6 +334,13 @@ document.addEventListener('click', (e) => {
 
 // ── Weather fetching ──
 async function fetchWeather(lat, lon, name, { silent = false } = {}) {
+  // Skip if same location and data is still fresh (avoids duplicate calls)
+  if (silent && latestWeatherData && currentLocation &&
+      currentLocation.lat === lat && currentLocation.lon === lon &&
+      Date.now() - lastFetchTime < STALE_MS) {
+    return;
+  }
+
   const hasData = silent && latestWeatherData;
   emptyStateEl.classList.add('hidden');
   if (hasData) {
@@ -394,14 +401,81 @@ function windLabel() {
   return 'mph';
 }
 
-function renderCurrent(data, name) {
+// ── Smart condition derivation using all available signals ──
+function deriveCurrentCode(data) {
   const c = data.current;
   let code = c.weather_code;
+  const precip = c.precipitation ?? 0; // mm or inch depending on unit
 
-  // Fallback: If it's raining but the code is just cloudy/overcast, adjust it
-  if (c.precipitation > 0 && code <= 3) {
-    code = 61; // Slight rain
+  // Check minutely_15 for thunderstorm codes in the current window (±15 min)
+  const now = new Date();
+  const m15Times = data.minutely_15?.time ?? [];
+  const codeM15 = data.minutely_15?.weather_code ?? [];
+  const lpiArr = data.minutely_15?.lightning_potential ?? [];
+  const capeM15 = data.minutely_15?.cape ?? [];
+
+  let m15Idx = m15Times.findIndex((t) => new Date(t) >= now);
+  if (m15Idx < 0) m15Idx = Math.max(0, m15Times.length - 1);
+  // Look at current slot and the one before (covers ±15 min window)
+  const m15Window = [m15Idx - 1, m15Idx, m15Idx + 1].filter(
+    (i) => i >= 0 && i < m15Times.length
+  );
+
+  let nearLPI = 0;
+  let nearCape = 0;
+  let m15StormCode = null;
+  for (const i of m15Window) {
+    if (lpiArr[i] != null && lpiArr[i] > nearLPI) nearLPI = lpiArr[i];
+    if (capeM15[i] != null && capeM15[i] > nearCape) nearCape = capeM15[i];
+    if ([95, 96, 99].includes(codeM15[i]) && m15StormCode === null) {
+      m15StormCode = codeM15[i];
+    }
   }
+
+  // Also grab hourly CAPE for the current hour
+  const hourTimes = data.hourly?.time ?? [];
+  const capeHourly = data.hourly?.cape ?? [];
+  let hIdx = hourTimes.findIndex((t) => new Date(t) >= now);
+  if (hIdx < 0) hIdx = Math.max(0, hourTimes.length - 1);
+  const hourlyCape = capeHourly[hIdx] ?? 0;
+  const maxCape = Math.max(nearCape, hourlyCape);
+
+  // --- Priority 1: Thunderstorm upgrade ---
+  // If minutely_15 reports a storm code right now, trust it
+  if (m15StormCode !== null) return m15StormCode;
+  // If active lightning potential + precip, it's a thunderstorm
+  if (nearLPI > 0 && precip > 0) return 95;
+  // High CAPE + meaningful precip = likely convective storm
+  if (maxCape >= 1000 && precip > 0) return 95;
+
+  // --- Priority 2: Precipitation intensity mapping ---
+  if (precip > 0 && code <= 3) {
+    // Code says clear/cloudy but it's precipitating — use intensity bands
+    // Thresholds differ by unit; Open-Meteo sends mm by default, inch if configured
+    const isInch = settings.precipUnit === 'inch';
+    const heavy = isInch ? 0.3 : 7.6;   // per hour equiv
+    const moderate = isInch ? 0.1 : 2.5;
+    if (precip >= heavy) return 65;       // Heavy rain
+    if (precip >= moderate) return 63;    // Moderate rain
+    return 61;                             // Slight rain
+  }
+
+  // --- Priority 3: Intensity correction when already raining ---
+  // If code already indicates rain but intensity is higher, upgrade
+  if ([61, 80].includes(code) && precip > 0) {
+    const isInch = settings.precipUnit === 'inch';
+    const heavy = isInch ? 0.3 : 7.6;
+    const moderate = isInch ? 0.1 : 2.5;
+    if (precip >= heavy) return 65;
+    if (precip >= moderate) return 63;
+  }
+
+  return code;
+}
+
+function renderCurrent(data, name) {
+  const c = data.current;
+  const code = deriveCurrentCode(data);
 
   const [icon, desc] = weatherInfo(code);
 
@@ -742,8 +816,9 @@ if ('serviceWorker' in navigator) {
 
 // ── Refresh on focus (if data is stale) ──
 let lastFetchTime = 0;
-// Only refresh if data is more than 5 minutes old
-const STALE_MS = 5 * 60 * 1000;
+// Refresh if data is more than 10 minutes old (Open-Meteo updates every 15 min;
+// 10 min balances freshness vs unnecessary requests)
+const STALE_MS = 10 * 60 * 1000;
 
 function refreshWeatherIfNeeded() {
   if (currentLocation && Date.now() - lastFetchTime > STALE_MS) {
@@ -751,13 +826,12 @@ function refreshWeatherIfNeeded() {
   }
 }
 
+// Use only visibilitychange to avoid double-fetch when both fire on tab-return
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible') {
     refreshWeatherIfNeeded();
   }
 });
-
-window.addEventListener('focus', refreshWeatherIfNeeded);
 
 // ── Load last viewed or first saved location on startup ──
 (function init() {
@@ -799,6 +873,8 @@ function generateActivityOutlook(data) {
   let maxCape = 0;
   let minTemp = 1000;
   let maxTemp = -1000;
+  let overcastCount = 0;
+  let cloudyCount = 0;
 
   let peakWindIdx = indices[0];
   let peakWindSpeedForDir = -1;
@@ -814,6 +890,8 @@ function generateActivityOutlook(data) {
     if (wind > maxWind) maxWind = wind;
     if (gusts > maxGusts) maxGusts = gusts;
     if (temp < minTemp) minTemp = temp;
+    if (code === 3) overcastCount++;
+    else if (code === 2) cloudyCount++;
     if (temp > maxTemp) maxTemp = temp;
     if (cape > maxCape) maxCape = cape;
 
@@ -935,18 +1013,32 @@ function generateActivityOutlook(data) {
   let windText = "";
   let windThreshold = settings.windUnit === 'kmh' ? 24 : (settings.windUnit === 'ms' ? 6 : 15);
   let gustThreshold = settings.windUnit === 'kmh' ? 32 : (settings.windUnit === 'ms' ? 9 : 20);
+  let calmCeiling = settings.windUnit === 'kmh' ? 11 : (settings.windUnit === 'ms' ? 3 : 7);
 
   if (maxGusts > gustThreshold) {
     windText = `Wind gusts up to <strong>${Math.round(maxGusts)} ${wLabel}</strong> from the <strong>${peakWindDirStr}</strong>.`;
   } else if (maxWind > windThreshold) {
     windText = `Sustained winds up to <strong>${Math.round(maxWind)} ${wLabel}</strong> from the <strong>${peakWindDirStr}</strong>.`;
+  } else if (maxGusts > calmCeiling) {
+    windText = `Light winds with gusts to <strong>${Math.round(maxGusts)} ${wLabel}</strong> (${peakWindDirStr}).`;
   } else {
-    windText = `Calm winds peaking at just <strong>${Math.round(maxGusts)} ${wLabel}</strong> (${peakWindDirStr}).`;
+    windText = `Calm winds at <strong>${Math.round(maxWind)} ${wLabel}</strong> (${peakWindDirStr}).`;
   }
 
   // Final overall score/recommendation for outdoor sports/biking
   let rating = "Great";
-  let reason = "Calm winds, pleasant temperatures, and clear skies.";
+  // Derive sky description from actual codes
+  let skyDesc;
+  if (overcastCount >= hoursToLook * 0.5) skyDesc = 'overcast skies';
+  else if ((overcastCount + cloudyCount) >= hoursToLook * 0.5) skyDesc = 'partly cloudy skies';
+  else skyDesc = 'clear skies';
+  // Derive wind description from actual speeds
+  let windDesc;
+  if (maxGusts > gustThreshold) windDesc = 'gusty winds';
+  else if (maxWind > windThreshold) windDesc = 'breezy conditions';
+  else if (maxGusts > calmCeiling) windDesc = 'light winds';
+  else windDesc = 'calm winds';
+  let reason = `${windDesc.charAt(0).toUpperCase() + windDesc.slice(1)}, pleasant temperatures, and ${skyDesc}.`;
   let ratingColor = "#66bb6a"; // Green
 
   const reasons = [];

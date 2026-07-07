@@ -606,6 +606,25 @@ header {
   }
 }
 
+@media (max-width: 390px) {
+  #app {
+    padding: 12px 4px;
+  }
+
+  .card {
+    padding: 14px 10px;
+    border-radius: 12px;
+  }
+
+  .storm-alert {
+    padding: 10px 10px;
+  }
+
+  .daily-row {
+    padding: 10px 4px;
+  }
+}
+
 /* Settings */
 .settings-header {
   display: flex;
