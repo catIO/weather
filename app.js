@@ -336,8 +336,8 @@ document.addEventListener('click', (e) => {
 async function fetchWeather(lat, lon, name, { silent = false } = {}) {
   // Skip if same location and data is still fresh (avoids duplicate calls)
   if (silent && latestWeatherData && currentLocation &&
-      currentLocation.lat === lat && currentLocation.lon === lon &&
-      Date.now() - lastFetchTime < STALE_MS) {
+    currentLocation.lat === lat && currentLocation.lon === lon &&
+    Date.now() - lastFetchTime < STALE_MS) {
     return;
   }
 
@@ -908,7 +908,7 @@ function generateActivityOutlook(data) {
       else if ([56, 57, 66, 67].includes(code)) willIce = true;
       else if ([51, 53, 55, 61, 63, 65, 80, 81, 82, 95, 96, 99].includes(code)) willRain = true;
     }
-    
+
     const freezingTemp = settings.unit === 'fahrenheit' ? 32 : 0;
     if (temp <= freezingTemp && (willRain || willSnow || precipProb > 30)) {
       willIce = true;
@@ -919,7 +919,7 @@ function generateActivityOutlook(data) {
   const tLabel = unitLabel();
   const peakWindDirDeg = data.hourly.wind_direction_10m[peakWindIdx];
   const peakWindDirStr = windDirection(peakWindDirDeg);
-  
+
   let html = `<div style="display:flex; flex-direction:column; gap:16px;">`;
 
   // 1. Temperature range & Extreme temperatures
@@ -954,7 +954,7 @@ function generateActivityOutlook(data) {
   // 2. Storm & Precipitation Risk
   let precipText = "";
   let precipSeverity = "none"; // 'severe', 'warning', 'watch', 'none'
-  
+
   const hasHighInstability = maxCape >= 1000;
   const hasModerateInstability = maxCape >= 500 && maxCape < 1000;
   const precipProbMax = indices.reduce((max, idx) => Math.max(max, data.hourly.precipitation_probability[idx] ?? 0), 0);

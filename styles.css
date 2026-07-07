@@ -44,8 +44,15 @@
 }
 
 @keyframes storm-pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.75; }
+
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0.75;
+  }
 }
 
 .storm-alert-icon {
@@ -83,9 +90,17 @@
 }
 
 /* CAPE value coloring */
-.cape-low  { color: var(--text-muted); }
-.cape-mod  { color: var(--storm); }
-.cape-high { color: var(--storm-severe); }
+.cape-low {
+  color: var(--text-muted);
+}
+
+.cape-mod {
+  color: var(--storm);
+}
+
+.cape-high {
+  color: var(--storm-severe);
+}
 
 body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -176,7 +191,7 @@ header {
   background: var(--card-hover);
 }
 
-.suggestion-item + .suggestion-item {
+.suggestion-item+.suggestion-item {
   border-top: 1px solid var(--border);
 }
 
@@ -221,7 +236,9 @@ header {
 }
 
 @keyframes spin {
-  to { transform: rotate(360deg); }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 /* Error */
@@ -932,7 +949,8 @@ header {
 
   #hourly {
     grid-column: 2;
-    min-width: 0; /* Prevents overflow from stretching the grid track */
+    min-width: 0;
+    /* Prevents overflow from stretching the grid track */
   }
 
   #daily {
@@ -948,6 +966,3 @@ header {
     width: 100%;
   }
 }
-
-
-
