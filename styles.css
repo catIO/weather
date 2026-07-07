@@ -457,7 +457,7 @@ header {
 
 .daily-row {
   display: grid;
-  grid-template-columns: 1fr 36px 90px 68px 140px;
+  grid-template-columns: minmax(80px, 1fr) 42px 70px 50px 110px;
   align-items: center;
   padding: 16px;
   background: rgba(255, 255, 255, 0.03);
@@ -506,6 +506,7 @@ header {
 
 .daily-temps {
   text-align: right;
+  white-space: nowrap;
 }
 
 .daily-high {
@@ -563,7 +564,7 @@ header {
 }
 
 /* Responsive */
-@media (max-width: 480px) {
+@media (max-width: 560px) {
   .current-details {
     grid-template-columns: repeat(2, 1fr);
   }
@@ -577,9 +578,9 @@ header {
   }
 
   .daily-row {
-    grid-template-columns: 1fr 28px 76px 56px 90px;
-    gap: 8px 10px;
-    padding: 12px 10px;
+    grid-template-columns: minmax(70px, 1fr) 36px 60px 45px 65px;
+    gap: 8px 6px;
+    padding: 12px 8px;
   }
 
   .daily-icon {
@@ -869,5 +870,65 @@ header {
   opacity: 0.8;
   color: var(--accent);
 }
+
+/* Desktop Dashboard Layout */
+@media (min-width: 1024px) {
+  #app {
+    max-width: 1200px;
+    display: grid;
+    grid-template-columns: 420px 1fr;
+    column-gap: 24px;
+    row-gap: 20px;
+    align-items: start;
+  }
+
+  header,
+  #settingsPanel,
+  #loading,
+  #error,
+  #emptyState,
+  .attribution {
+    grid-column: 1 / -1;
+  }
+
+  /* Center the search header on desktop */
+  header {
+    max-width: 800px;
+    margin: 0 auto 20px;
+    width: 100%;
+  }
+
+  #current {
+    grid-column: 1;
+    grid-row: span 2;
+    margin-bottom: 0;
+    align-self: start;
+  }
+
+  /* Prevent details wrapping by switching to a 2-column grid */
+  #current .current-details {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 12px;
+  }
+
+  #hourly {
+    grid-column: 2;
+    min-width: 0; /* Prevents overflow from stretching the grid track */
+  }
+
+  #daily {
+    grid-column: 2;
+    min-width: 0;
+  }
+
+  /* Keep settings and empty state compact and centered */
+  #settingsPanel,
+  #emptyState {
+    max-width: 640px;
+    margin: 0 auto;
+    width: 100%;
+  }
+}
+
 
 
