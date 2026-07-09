@@ -330,7 +330,7 @@ async function searchLocations(query, autoSelect = false) {
 
 function formatLocation(loc) {
   const parts = [loc.name];
-  if (loc.admin1) parts.push(loc.admin1);
+  if (loc.admin1 && loc.admin1 !== loc.name) parts.push(loc.admin1);
   if (loc.country) parts.push(loc.country);
   return parts.join(', ');
 }
