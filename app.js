@@ -217,6 +217,24 @@ saveLocationBtn.addEventListener('click', () => {
   renderLocations();
 });
 
+// ── Recent searches (localStorage, max 3) ──
+function loadRecentSearches() {
+  try {
+    return JSON.parse(localStorage.getItem('weather_recent_searches')) || [];
+  } catch { return []; }
+}
+
+function saveRecentSearch(loc) {
+  let recents = loadRecentSearches();
+  // Remove duplicate if exists
+  recents = recents.filter(r => !(r.lat === loc.lat && r.lon === loc.lon));
+  // Add to front
+  recents.unshift(loc);
+  // Keep only 3
+  if (recents.length > 3) recents.length = 3;
+  localStorage.setItem('weather_recent_searches', JSON.stringify(recents));
+}
+
 // ── Geocoding search ──
 let debounceTimer;
 
@@ -225,9 +243,16 @@ searchInput.addEventListener('input', () => {
   const q = searchInput.value.trim();
   if (q.length < 2) {
     suggestionsEl.classList.add('hidden');
+    if (q.length === 0) showRecentSearches();
     return;
   }
   debounceTimer = setTimeout(() => searchLocations(q), 300);
+});
+
+searchInput.addEventListener('focus', () => {
+  if (searchInput.value.trim().length < 2) {
+    showRecentSearches();
+  }
 });
 
 searchInput.addEventListener('keydown', (e) => {
@@ -292,7 +317,9 @@ async function searchLocations(query, autoSelect = false) {
       suggestionsEl.classList.add('hidden');
       searchInput.value = '';
       searchInput.blur();
-      fetchWeather(loc.latitude, loc.longitude, formatLocation(loc));
+      const name = formatLocation(loc);
+      saveRecentSearch({ lat: loc.latitude, lon: loc.longitude, name });
+      fetchWeather(loc.latitude, loc.longitude, name);
       return;
     }
     renderSuggestions(data.results);
@@ -318,7 +345,31 @@ function renderSuggestions(results) {
       suggestionsEl.classList.add('hidden');
       searchInput.value = '';
       searchInput.blur();
-      fetchWeather(loc.latitude, loc.longitude, formatLocation(loc));
+      const name = formatLocation(loc);
+      saveRecentSearch({ lat: loc.latitude, lon: loc.longitude, name });
+      fetchWeather(loc.latitude, loc.longitude, name);
+    });
+    suggestionsEl.appendChild(div);
+  });
+  suggestionsEl.classList.remove('hidden');
+}
+
+function showRecentSearches() {
+  const recents = loadRecentSearches();
+  if (recents.length === 0) {
+    suggestionsEl.classList.add('hidden');
+    return;
+  }
+  suggestionsEl.innerHTML = '';
+  recents.forEach((loc) => {
+    const div = document.createElement('div');
+    div.className = 'suggestion-item';
+    div.textContent = loc.name;
+    div.addEventListener('click', () => {
+      suggestionsEl.classList.add('hidden');
+      searchInput.value = '';
+      searchInput.blur();
+      fetchWeather(loc.lat, loc.lon, loc.name);
     });
     suggestionsEl.appendChild(div);
   });
@@ -483,11 +534,30 @@ function renderCurrent(data, name) {
 
   $('cityName').textContent = name;
   const now = new Date();
-  $('currentDate').textContent = now.toLocaleDateString('en-US', {
+  const localDateStr = now.toLocaleDateString('en-US', {
     weekday: 'long', month: 'long', day: 'numeric',
   }) + '  ·  ' + now.toLocaleTimeString('en-US', {
     hour: 'numeric', minute: '2-digit',
   });
+
+  // Show location's local time if it differs from user's timezone
+  const locTz = data.timezone;
+  let dateDisplay = localDateStr;
+  if (locTz) {
+    try {
+      const locTime = now.toLocaleTimeString('en-US', {
+        hour: 'numeric', minute: '2-digit',
+        timeZone: locTz,
+      });
+      const myTime = now.toLocaleTimeString('en-US', {
+        hour: 'numeric', minute: '2-digit',
+      });
+      if (locTime !== myTime) {
+        dateDisplay += `  ·  ${locTime} local`;
+      }
+    } catch { /* invalid timezone, skip */ }
+  }
+  $('currentDate').textContent = dateDisplay;
   $('weatherIcon').textContent = icon;
   $('currentTemp').textContent = `${Math.round(c.temperature_2m)}${unitLabel()}`;
   $('weatherDesc').textContent = desc;
