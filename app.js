@@ -352,6 +352,7 @@ async function fetchWeather(lat, lon, name, { silent = false } = {}) {
   }
   currentLocation = { lat, lon, name };
   lastFetchTime = Date.now();
+  localStorage.setItem('weather_last_fetch_time', String(lastFetchTime));
   localStorage.setItem('weather_last_location', JSON.stringify(currentLocation));
 
   const tempUnit = settings.unit;
@@ -382,6 +383,7 @@ async function fetchWeather(lat, lon, name, { silent = false } = {}) {
     renderHourly(data);
     renderDaily(data);
     lastFetchTime = Date.now();
+    localStorage.setItem('weather_last_fetch_time', String(lastFetchTime));
   } catch {
     if (!hasData) {
       showError('Failed to fetch weather data. Please try again.');
@@ -896,6 +898,12 @@ let lastFetchTime = 0;
 // 10 min balances freshness vs unnecessary requests)
 const STALE_MS = 10 * 60 * 1000;
 
+// Persist lastFetchTime so staleness survives PWA suspend/resume
+try {
+  const stored = localStorage.getItem('weather_last_fetch_time');
+  if (stored) lastFetchTime = parseInt(stored, 10) || 0;
+} catch { /* ignore */ }
+
 function refreshWeatherIfNeeded() {
   if (currentLocation && Date.now() - lastFetchTime > STALE_MS) {
     fetchWeather(currentLocation.lat, currentLocation.lon, currentLocation.name, { silent: true });
@@ -915,17 +923,25 @@ document.addEventListener('visibilitychange', () => {
 
 window.addEventListener('pageshow', (e) => {
   // Fires on back/forward cache restore (bfcache) and PWA resume
-  if (e.persisted) refreshWeatherIfNeeded();
+  refreshWeatherIfNeeded();
 });
 
 window.addEventListener('focus', refreshWeatherIfNeeded);
 
+// PWA resume fallback: check on first user interaction after returning
+// (covers cases where visibility/focus events don't fire on mobile PWAs)
+['touchstart', 'pointerdown'].forEach(evt => {
+  document.addEventListener(evt, () => refreshWeatherIfNeeded(), { passive: true });
+});
+
 // ── Periodic auto-refresh while page is visible ──
 let autoRefreshTimer = null;
+// Check every 60s if data is stale (cheap local comparison; only fetches if needed)
+const CHECK_INTERVAL = 60 * 1000;
 
 function startAutoRefresh() {
   if (autoRefreshTimer) return;
-  autoRefreshTimer = setInterval(refreshWeatherIfNeeded, STALE_MS);
+  autoRefreshTimer = setInterval(refreshWeatherIfNeeded, CHECK_INTERVAL);
 }
 
 function stopAutoRefresh() {
