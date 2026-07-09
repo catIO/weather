@@ -492,14 +492,14 @@ function renderCurrent(data, name) {
   $('dewPoint').textContent = `${Math.round(c.dew_point_2m)}${unitLabel()}`;
   $('humidity').textContent = `${c.relative_humidity_2m}%`;
   const windSpeed = Math.round(c.wind_speed_10m);
-  $('windSpeed').textContent = `${windSpeed} ${windLabel()}`;
-
   const gusts = c.wind_gusts_10m;
   const gustsSpan = $('windGusts');
-  if (gusts != null && gusts - windSpeed >= 6) {
+  if (gusts != null && gusts > windSpeed) {
+    $('windSpeed').textContent = `${windSpeed} ${windLabel()}`;
     gustsSpan.textContent = `Gusts: ${Math.round(gusts)} ${windLabel()}`;
     gustsSpan.style.display = 'block';
   } else {
+    $('windSpeed').textContent = `${windSpeed} ${windLabel()}`;
     gustsSpan.style.display = 'none';
   }
   $('windDir').innerHTML = `${windDirection(c.wind_direction_10m)}<span class="wind-dir">${String(Math.round(c.wind_direction_10m)).padStart(3, '0')}°</span>`;
@@ -517,6 +517,60 @@ function renderCurrent(data, name) {
   $('pressure').innerHTML = `${currentPressure} ${pressureUnitLabel}<span class="pressure-trend">${trend}</span>`;
 
   $('uvIndex').textContent = c.uv_index != null ? Math.round(c.uv_index) : '—';
+
+  // Precip Rate
+  const precip = c.precipitation ?? 0;
+  const precipUnitLabel = settings.precipUnit === 'inch' ? 'in/hr' : 'mm/hr';
+  $('precipRate').textContent = precip > 0 ? `${precip} ${precipUnitLabel}` : 'None';
+
+  // CAPE (from nearest minutely_15 or hourly)
+  const now2 = new Date();
+  const m15T = data.minutely_15?.time ?? [];
+  const m15C = data.minutely_15?.cape ?? [];
+  let capeIdx = m15T.findIndex((t) => new Date(t) >= now2);
+  if (capeIdx < 0) capeIdx = Math.max(0, m15T.length - 1);
+  let capeVal = m15C[capeIdx] ?? null;
+  if (capeVal == null) {
+    const hT = data.hourly?.time ?? [];
+    const hC = data.hourly?.cape ?? [];
+    let hIdx = hT.findIndex((t) => new Date(t) >= now2);
+    if (hIdx < 0) hIdx = Math.max(0, hT.length - 1);
+    capeVal = hC[hIdx] ?? 0;
+  }
+  $('cape').textContent = `${Math.round(capeVal)} J/kg`;
+
+  // ── Highlight elevated tiles ──
+  const isFahrenheit = settings.unit === 'fahrenheit';
+  const gustThresholdMph = settings.windUnit === 'kmh' ? 32 : (settings.windUnit === 'ms' ? 9 : 20);
+  const gustSevere = settings.windUnit === 'kmh' ? 48 : (settings.windUnit === 'ms' ? 13 : 30);
+
+  // Wind tile
+  const windTile = $('windSpeed').closest('.detail');
+  windTile.classList.toggle('elevated-severe', gusts >= gustSevere);
+  windTile.classList.toggle('elevated', gusts >= gustThresholdMph && gusts < gustSevere);
+
+  // UV tile
+  const uvVal = c.uv_index ?? 0;
+  const uvTile = $('uvIndex').closest('.detail');
+  uvTile.classList.toggle('elevated-severe', uvVal >= 8);
+  uvTile.classList.toggle('elevated', uvVal >= 6 && uvVal < 8);
+
+  // Precip tile
+  const precipTile = $('precipRate').closest('.detail');
+  const heavyPrecip = settings.precipUnit === 'inch' ? 0.3 : 7.6;
+  const modPrecip = settings.precipUnit === 'inch' ? 0.1 : 2.5;
+  precipTile.classList.toggle('elevated-severe', precip >= heavyPrecip);
+  precipTile.classList.toggle('elevated', precip >= modPrecip && precip < heavyPrecip);
+
+  // CAPE tile
+  const capeTile = $('cape').closest('.detail');
+  capeTile.classList.toggle('elevated-severe', capeVal >= 1000);
+  capeTile.classList.toggle('elevated', capeVal >= 500 && capeVal < 1000);
+
+  // Pressure tile (falling fast)
+  const pressureTile = $('pressure').closest('.detail');
+  pressureTile.classList.toggle('elevated', trend === 'Falling fast');
+  pressureTile.classList.remove('elevated-severe');
 
   renderStormAlert(data);
 
@@ -537,11 +591,15 @@ function renderStormAlert(data) {
   let maxLPI = 0;
   let maxCapeM15 = 0;
   let stormCodeActive = false;
+  let maxCapeM15Time = null;
 
   for (let i = 0; i < m15Slice; i++) {
     const idx = m15Start + i;
     if (lpiArr[idx] != null && lpiArr[idx] > maxLPI) maxLPI = lpiArr[idx];
-    if (capeM15[idx] != null && capeM15[idx] > maxCapeM15) maxCapeM15 = capeM15[idx];
+    if (capeM15[idx] != null && capeM15[idx] > maxCapeM15) {
+      maxCapeM15 = capeM15[idx];
+      maxCapeM15Time = m15Times[idx];
+    }
     if ([95, 96, 99].includes(codeM15[idx])) stormCodeActive = true;
   }
 
@@ -555,11 +613,16 @@ function renderStormAlert(data) {
   let hourStart = hourTimes.findIndex((t) => new Date(t) >= now);
   if (hourStart < 0) hourStart = 0;
   let maxCapeHourly = 0;
+  let maxCapeHourlyTime = null;
   for (let i = 0; i < 3 && (hourStart + i) < capeHourly.length; i++) {
     const v = capeHourly[hourStart + i] ?? 0;
-    if (v > maxCapeHourly) maxCapeHourly = v;
+    if (v > maxCapeHourly) {
+      maxCapeHourly = v;
+      maxCapeHourlyTime = hourTimes[hourStart + i];
+    }
   }
   const maxCape = Math.max(maxCapeM15, maxCapeHourly);
+  const maxCapeTime = maxCapeM15 >= maxCapeHourly ? maxCapeM15Time : maxCapeHourlyTime;
 
   // Determine severity
   // severe: active storm code OR LPI > 0 + CAPE > 1000
@@ -579,6 +642,16 @@ function renderStormAlert(data) {
   stormAlertEl.classList.remove('hidden');
   stormAlertEl.classList.toggle('storm-severe', isSevere);
 
+  // Helper: time until peak CAPE
+  function capeTimeDesc() {
+    if (!maxCapeTime) return '';
+    const diffMin = Math.round((new Date(maxCapeTime) - now) / 60000);
+    if (diffMin <= 15) return 'now';
+    if (diffMin < 60) return `in ~${diffMin} min`;
+    const hrs = Math.round(diffMin / 60);
+    return `in ~${hrs}hr`;
+  }
+
   if (isSevere) {
     stormAlertIconEl.style.display = 'block';
     stormAlertTitleEl.textContent = stormCodeActive
@@ -586,19 +659,22 @@ function renderStormAlert(data) {
       : 'Severe Storm Risk';
     const details = [];
     if (maxLPI > 0) details.push(`Lightning potential: ${maxLPI.toFixed(1)}`);
-    if (maxCape > 0) details.push(`CAPE: ${Math.round(maxCape)} J/kg`);
+    const peakTime = capeTimeDesc();
+    if (maxCape > 0) details.push(`CAPE peaks at ${Math.round(maxCape)} J/kg${peakTime ? ' ' + peakTime : ''}`);
     stormAlertDetailEl.textContent = details.join(' · ') || 'Dangerous conditions — stay indoors.';
   } else if (isWarning) {
     stormAlertIconEl.style.display = 'block';
     stormAlertTitleEl.textContent = 'Thunderstorm Warning';
     const details = [];
     if (maxLPI > 0) details.push(`Lightning potential: ${maxLPI.toFixed(1)}`);
-    if (maxCape > 0) details.push(`CAPE: ${Math.round(maxCape)} J/kg`);
+    const peakTime = capeTimeDesc();
+    if (maxCape > 0) details.push(`CAPE peaks at ${Math.round(maxCape)} J/kg${peakTime ? ' ' + peakTime : ''}`);
     stormAlertDetailEl.textContent = details.join(' · ') || 'Storm conditions likely in the next 2 hours.';
   } else {
     stormAlertIconEl.style.display = 'none';
     stormAlertTitleEl.textContent = 'Thunderstorm Watch';
-    stormAlertDetailEl.textContent = `CAPE: ${Math.round(maxCape)} J/kg — atmospheric instability elevated. Storms possible.`;
+    const peakTime = capeTimeDesc();
+    stormAlertDetailEl.textContent = `CAPE will reach ${Math.round(maxCape)} J/kg${peakTime ? ' ' + peakTime : ''}. Storms possible.`;
   }
 
 
@@ -826,12 +902,41 @@ function refreshWeatherIfNeeded() {
   }
 }
 
-// Use only visibilitychange to avoid double-fetch when both fire on tab-return
+// Use visibilitychange + pageshow + focus for broad browser/PWA coverage.
+// The staleness guard in fetchWeather prevents duplicate API calls.
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible') {
     refreshWeatherIfNeeded();
+    startAutoRefresh();
+  } else {
+    stopAutoRefresh();
   }
 });
+
+window.addEventListener('pageshow', (e) => {
+  // Fires on back/forward cache restore (bfcache) and PWA resume
+  if (e.persisted) refreshWeatherIfNeeded();
+});
+
+window.addEventListener('focus', refreshWeatherIfNeeded);
+
+// ── Periodic auto-refresh while page is visible ──
+let autoRefreshTimer = null;
+
+function startAutoRefresh() {
+  if (autoRefreshTimer) return;
+  autoRefreshTimer = setInterval(refreshWeatherIfNeeded, STALE_MS);
+}
+
+function stopAutoRefresh() {
+  if (autoRefreshTimer) {
+    clearInterval(autoRefreshTimer);
+    autoRefreshTimer = null;
+  }
+}
+
+// Start the timer on initial load (page is visible)
+startAutoRefresh();
 
 // ── Load last viewed or first saved location on startup ──
 (function init() {
