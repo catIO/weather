@@ -31,7 +31,6 @@
   border-radius: 12px;
   background: var(--storm-bg);
   border: 1px solid var(--storm-border);
-  animation: storm-pulse 2.5s ease-in-out infinite;
 }
 
 .storm-alert.storm-severe {
@@ -43,17 +42,7 @@
   display: none;
 }
 
-@keyframes storm-pulse {
 
-  0%,
-  100% {
-    opacity: 1;
-  }
-
-  50% {
-    opacity: 0.75;
-  }
-}
 
 .storm-alert-icon {
   font-size: 28px;

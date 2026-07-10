@@ -407,6 +407,11 @@ async function fetchWeather(lat, lon, name, { silent = false } = {}) {
   localStorage.setItem('weather_last_fetch_time', String(lastFetchTime));
   localStorage.setItem('weather_last_location', JSON.stringify(currentLocation));
 
+  // Update URL hash for sharing
+  updatingHash = true;
+  location.hash = `${lat},${lon},${name.replace(/ /g, '+')}`;
+  updatingHash = false;
+
   const tempUnit = settings.unit;
   const windUnit = settings.windUnit;
   const precipUnit = settings.precipUnit;
@@ -436,6 +441,9 @@ async function fetchWeather(lat, lon, name, { silent = false } = {}) {
     renderDaily(data);
     lastFetchTime = Date.now();
     localStorage.setItem('weather_last_fetch_time', String(lastFetchTime));
+
+    // Fetch NWS alerts (US only, non-blocking)
+    fetchNWSAlerts(lat, lon);
   } catch {
     if (!hasData) {
       showError('Failed to fetch weather data. Please try again.');
@@ -645,112 +653,60 @@ function renderCurrent(data, name) {
   pressureTile.classList.toggle('elevated', trend === 'Falling fast');
   pressureTile.classList.remove('elevated-severe');
 
-  renderStormAlert(data);
-
   currentEl.classList.remove('hidden');
 }
-function renderStormAlert(data) {
+
+// ── NWS Alerts (US only) ──
+async function fetchNWSAlerts(lat, lon) {
+  try {
+    const res = await fetch(
+      `https://api.weather.gov/alerts/active?point=${lat},${lon}&status=actual`,
+      { headers: { 'User-Agent': '(weather-pwa, contact@example.com)' } }
+    );
+    if (!res.ok) {
+      // Non-US location or API issue — just hide the alert
+      stormAlertEl.classList.add('hidden');
+      stormAlertEl.classList.remove('storm-severe');
+      return;
+    }
+    const json = await res.json();
+    renderNWSAlert(json.features || []);
+  } catch {
+    // Network error — silently hide alert
+    stormAlertEl.classList.add('hidden');
+    stormAlertEl.classList.remove('storm-severe');
+  }
+}
+
+function renderNWSAlert(features) {
+  // Filter to active alerts (use ends or expires as expiry)
   const now = new Date();
-  const m15Times = data.minutely_15?.time ?? [];
-  const lpiArr = data.minutely_15?.lightning_potential ?? [];
-  const capeM15 = data.minutely_15?.cape ?? [];
-  const codeM15 = data.minutely_15?.weather_code ?? [];
+  const alerts = features
+    .map((f) => f.properties)
+    .filter((p) => {
+      if (p.status !== 'Actual') return false;
+      const expiry = p.ends || p.expires;
+      return !expiry || new Date(expiry) > now;
+    });
 
-  // Find current + next 2 hours in minutely_15 (8 intervals × 15 min = 2 hrs)
-  let m15Start = m15Times.findIndex((t) => new Date(t) >= now);
-  if (m15Start < 0) m15Start = 0;
-  const m15Slice = Math.min(8, m15Times.length - m15Start);
-
-  let maxLPI = 0;
-  let maxCapeM15 = 0;
-  let stormCodeActive = false;
-  let maxCapeM15Time = null;
-
-  for (let i = 0; i < m15Slice; i++) {
-    const idx = m15Start + i;
-    if (lpiArr[idx] != null && lpiArr[idx] > maxLPI) maxLPI = lpiArr[idx];
-    if (capeM15[idx] != null && capeM15[idx] > maxCapeM15) {
-      maxCapeM15 = capeM15[idx];
-      maxCapeM15Time = m15Times[idx];
-    }
-    if ([95, 96, 99].includes(codeM15[idx])) stormCodeActive = true;
-  }
-
-  // Also check current WMO code
-  const currentCode = data.current.weather_code;
-  if ([95, 96, 99].includes(currentCode)) stormCodeActive = true;
-
-  // Determine CAPE from hourly for next 3 hours
-  const hourTimes = data.hourly?.time ?? [];
-  const capeHourly = data.hourly?.cape ?? [];
-  let hourStart = hourTimes.findIndex((t) => new Date(t) >= now);
-  if (hourStart < 0) hourStart = 0;
-  let maxCapeHourly = 0;
-  let maxCapeHourlyTime = null;
-  for (let i = 0; i < 3 && (hourStart + i) < capeHourly.length; i++) {
-    const v = capeHourly[hourStart + i] ?? 0;
-    if (v > maxCapeHourly) {
-      maxCapeHourly = v;
-      maxCapeHourlyTime = hourTimes[hourStart + i];
-    }
-  }
-  const maxCape = Math.max(maxCapeM15, maxCapeHourly);
-  const maxCapeTime = maxCapeM15 >= maxCapeHourly ? maxCapeM15Time : maxCapeHourlyTime;
-
-  // Determine severity
-  // severe: active storm code OR LPI > 0 + CAPE > 1000
-  // warning: LPI > 0 OR CAPE > 1000
-  // watch: CAPE > 500
-  const isSevere = stormCodeActive || (maxLPI > 0 && maxCape > 1000);
-  const isWarning = !isSevere && (maxLPI > 0 || maxCape > 1000);
-  const isWatch = !isSevere && !isWarning && maxCape > 500;
-
-  // Hide alert if no signal
-  if (!isSevere && !isWarning && !isWatch) {
+  if (alerts.length === 0) {
     stormAlertEl.classList.add('hidden');
     stormAlertEl.classList.remove('storm-severe');
     return;
   }
 
+  // Sort by severity: Extreme > Severe > Moderate > Minor > Unknown
+  const sevOrder = { Extreme: 0, Severe: 1, Moderate: 2, Minor: 3, Unknown: 4 };
+  alerts.sort((a, b) => (sevOrder[a.severity] ?? 4) - (sevOrder[b.severity] ?? 4));
+
+  const top = alerts[0];
+  const isSevere = top.severity === 'Extreme' || top.severity === 'Severe';
+
   stormAlertEl.classList.remove('hidden');
   stormAlertEl.classList.toggle('storm-severe', isSevere);
-
-  // Helper: time until peak CAPE
-  function capeTimeDesc() {
-    if (!maxCapeTime) return '';
-    const diffMin = Math.round((new Date(maxCapeTime) - now) / 60000);
-    if (diffMin <= 15) return 'now';
-    if (diffMin < 60) return `in ~${diffMin} min`;
-    const hrs = Math.round(diffMin / 60);
-    return `in ~${hrs}hr`;
-  }
-
-  if (isSevere) {
-    stormAlertIconEl.style.display = 'block';
-    stormAlertTitleEl.textContent = stormCodeActive
-      ? (currentCode === 99 ? 'Thunderstorm with Heavy Hail' : currentCode === 96 ? 'Thunderstorm with Hail' : 'Thunderstorm Active')
-      : 'Severe Storm Risk';
-    const details = [];
-    if (maxLPI > 0) details.push(`Lightning potential: ${maxLPI.toFixed(1)}`);
-    const peakTime = capeTimeDesc();
-    if (maxCape > 0) details.push(`CAPE peaks at ${Math.round(maxCape)} J/kg${peakTime ? ' ' + peakTime : ''}`);
-    stormAlertDetailEl.textContent = details.join(' · ') || 'Dangerous conditions — stay indoors.';
-  } else if (isWarning) {
-    stormAlertIconEl.style.display = 'block';
-    stormAlertTitleEl.textContent = 'Thunderstorm Warning';
-    const details = [];
-    if (maxLPI > 0) details.push(`Lightning potential: ${maxLPI.toFixed(1)}`);
-    const peakTime = capeTimeDesc();
-    if (maxCape > 0) details.push(`CAPE peaks at ${Math.round(maxCape)} J/kg${peakTime ? ' ' + peakTime : ''}`);
-    stormAlertDetailEl.textContent = details.join(' · ') || 'Storm conditions likely in the next 2 hours.';
-  } else {
-    stormAlertIconEl.style.display = 'none';
-    stormAlertTitleEl.textContent = 'Thunderstorm Watch';
-    const peakTime = capeTimeDesc();
-    stormAlertDetailEl.textContent = `CAPE will reach ${Math.round(maxCape)} J/kg${peakTime ? ' ' + peakTime : ''}. Storms possible.`;
-  }
-
-
+  stormAlertIconEl.style.display = isSevere ? 'block' : 'none';
+  stormAlertTitleEl.textContent = top.event;
+  stormAlertDetailEl.textContent = top.headline || top.description?.slice(0, 120) || '';
 }
 
 function renderHourly(data) {
@@ -996,7 +952,34 @@ window.addEventListener('pageshow', () => {
 window.addEventListener('focus', refreshWeatherIfNeeded);
 
 // ── Load last viewed or first saved location on startup ──
+// ── Parse location from URL hash ──
+function parseLocationHash() {
+  const hash = location.hash.slice(1); // remove #
+  if (!hash) return null;
+  const parts = hash.split(',');
+  if (parts.length < 2) return null;
+  const lat = parseFloat(parts[0]);
+  const lon = parseFloat(parts[1]);
+  if (isNaN(lat) || isNaN(lon)) return null;
+  const name = parts.length >= 3 ? decodeURIComponent(parts.slice(2).join(',').replace(/\+/g, ' ')) : 'Shared Location';
+  return { lat, lon, name };
+}
+
+let updatingHash = false;
+window.addEventListener('hashchange', () => {
+  if (updatingHash) return;
+  const loc = parseLocationHash();
+  if (loc) fetchWeather(loc.lat, loc.lon, loc.name);
+});
+
 (function init() {
+  // URL hash takes priority (shared link)
+  const hashLoc = parseLocationHash();
+  if (hashLoc) {
+    fetchWeather(hashLoc.lat, hashLoc.lon, hashLoc.name);
+    return;
+  }
+
   const last = localStorage.getItem('weather_last_location');
   if (last) {
     try {
