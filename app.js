@@ -981,49 +981,19 @@ function refreshWeatherIfNeeded() {
   }
 }
 
-// Use visibilitychange + pageshow + focus for broad browser/PWA coverage.
-// The staleness guard in fetchWeather prevents duplicate API calls.
+// Refresh only when user returns to the page (visibility/focus/pageshow),
+// and only if data is more than 10 minutes stale. No periodic background polling.
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible') {
     refreshWeatherIfNeeded();
-    startAutoRefresh();
-  } else {
-    stopAutoRefresh();
   }
 });
 
-window.addEventListener('pageshow', (e) => {
-  // Fires on back/forward cache restore (bfcache) and PWA resume
+window.addEventListener('pageshow', () => {
   refreshWeatherIfNeeded();
 });
 
 window.addEventListener('focus', refreshWeatherIfNeeded);
-
-// PWA resume fallback: check on first user interaction after returning
-// (covers cases where visibility/focus events don't fire on mobile PWAs)
-['touchstart', 'pointerdown'].forEach(evt => {
-  document.addEventListener(evt, () => refreshWeatherIfNeeded(), { passive: true });
-});
-
-// ── Periodic auto-refresh while page is visible ──
-let autoRefreshTimer = null;
-// Check every 60s if data is stale (cheap local comparison; only fetches if needed)
-const CHECK_INTERVAL = 60 * 1000;
-
-function startAutoRefresh() {
-  if (autoRefreshTimer) return;
-  autoRefreshTimer = setInterval(refreshWeatherIfNeeded, CHECK_INTERVAL);
-}
-
-function stopAutoRefresh() {
-  if (autoRefreshTimer) {
-    clearInterval(autoRefreshTimer);
-    autoRefreshTimer = null;
-  }
-}
-
-// Start the timer on initial load (page is visible)
-startAutoRefresh();
 
 // ── Load last viewed or first saved location on startup ──
 (function init() {
