@@ -44,6 +44,80 @@ function getHourlyIcon(code, precipProb, cape) {
   return weatherInfo(code)[0];
 }
 
+// Derive a representative daily icon from hourly data (daytime hours 6am-9pm)
+// instead of using the daily weather_code which picks the single "worst" event.
+function getDailyIcon(data, dayStr) {
+  const hourlyTimes = data.hourly.time;
+  const daytimeStart = dayStr + 'T06:00';
+  const daytimeEnd = dayStr + 'T21:00';
+
+  // Collect daytime hourly codes and precip probabilities
+  const daytimeHours = [];
+  for (let h = 0; h < hourlyTimes.length; h++) {
+    if (hourlyTimes[h] >= daytimeStart && hourlyTimes[h] <= daytimeEnd) {
+      daytimeHours.push({
+        code: data.hourly.weather_code[h],
+        precip: data.hourly.precipitation_probability[h] || 0,
+        cape: data.hourly.cape ? data.hourly.cape[h] : 0,
+      });
+    }
+  }
+
+  if (daytimeHours.length === 0) {
+    // Fallback to daily code if no hourly data
+    return weatherInfo(data.daily.weather_code[
+      data.daily.time.indexOf(dayStr)
+    ])[0];
+  }
+
+  // Count hours by category, weighted by precipitation probability
+  let thunderHours = 0;
+  let rainHours = 0;
+  let cloudyHours = 0;
+  let clearHours = 0;
+
+  for (const hr of daytimeHours) {
+    const { code, precip, cape } = hr;
+    if ([95, 96, 99].includes(code) || (cape >= 500 && precip >= 40)) {
+      thunderHours++;
+    } else if (code >= 51 && precip >= 30) {
+      // Only count as rain if precip probability supports it
+      rainHours++;
+    } else if (code >= 51 && precip >= 15) {
+      // Borderline rain — count as half cloud, half rain
+      rainHours += 0.5;
+      cloudyHours += 0.5;
+    } else if (code >= 2 || (precip >= 20 && precip < 30)) {
+      cloudyHours++;
+    } else {
+      clearHours++;
+    }
+  }
+
+  const total = daytimeHours.length;
+
+  // Determine icon based on proportions
+  if (thunderHours >= 2 || thunderHours / total >= 0.15) {
+    return '⛈️';
+  }
+  if (rainHours / total >= 0.4) {
+    return '🌧️';
+  }
+  if (rainHours / total >= 0.2) {
+    return '🌦️';
+  }
+  if (cloudyHours / total >= 0.7) {
+    return '☁️';
+  }
+  if (cloudyHours / total >= 0.4) {
+    return '⛅';
+  }
+  if (cloudyHours / total >= 0.2 || clearHours < total) {
+    return '🌤️';
+  }
+  return '☀️';
+}
+
 function windDirection(degrees) {
   const dirs = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE',
     'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW'];
@@ -72,6 +146,7 @@ const $ = (id) => document.getElementById(id);
 const searchInput = $('searchInput');
 const searchBtn = $('searchBtn');
 const geoBtn = $('geoBtn');
+const shareBtn = $('shareBtn');
 const settingsBtn = $('settingsBtn');
 const settingsPanel = $('settingsPanel');
 const closeSettings = $('closeSettings');
@@ -97,6 +172,44 @@ const stormAlertDetailEl = $('stormAlertDetail');
 let latestWeatherData = null;
 
 // ── Settings (localStorage) ──
+// Country-based unit defaults (applied only on first use)
+const METRIC_COUNTRIES = new Set(); // Most countries use metric; we track the exceptions
+const IMPERIAL_COUNTRIES = new Set(['US', 'LR', 'MM']); // Fahrenheit / mph / inch
+
+function getDefaultsForCountry(countryCode) {
+  if (IMPERIAL_COUNTRIES.has(countryCode)) {
+    return { unit: 'fahrenheit', windUnit: 'mph', precipUnit: 'inch', pressureUnit: 'inHg', distanceUnit: 'mi' };
+  }
+  if (countryCode === 'GB') {
+    return { unit: 'celsius', windUnit: 'mph', precipUnit: 'mm', pressureUnit: 'hPa', distanceUnit: 'mi' };
+  }
+  // Metric defaults for all other countries
+  return { unit: 'celsius', windUnit: 'kmh', precipUnit: 'mm', pressureUnit: 'hPa', distanceUnit: 'km' };
+}
+
+async function detectCountryDefaults() {
+  // Only run on first use (no saved settings exist)
+  if (localStorage.getItem('weather_settings')) return;
+  try {
+    const res = await fetch('https://ipapi.co/country/', { signal: AbortSignal.timeout(3000) });
+    if (!res.ok) return;
+    const country = (await res.text()).trim().toUpperCase();
+    if (country.length === 2) {
+      const defaults = getDefaultsForCountry(country);
+      Object.assign(settings, defaults);
+      saveSettings(settings);
+      // Update UI toggles to reflect detected defaults
+      document.querySelectorAll('.unit-btn').forEach((btn) =>
+        btn.classList.toggle('active', btn.dataset.unit === settings.unit)
+      );
+      ['windUnit', 'precipUnit', 'pressureUnit', 'distanceUnit'].forEach(key => {
+        const el = $(key);
+        if (el) el.value = settings[key];
+      });
+    }
+  } catch { /* Network error — keep hardcoded defaults */ }
+}
+
 function loadSettings() {
   try {
     return Object.assign({
@@ -131,6 +244,27 @@ function saveLocations(locations) {
 let savedLocations = loadLocations();
 let currentLocation = null; // { lat, lon, name }
 
+// ── Toast ──
+function showToast(message) {
+  let toast = document.querySelector('.toast');
+  if (!toast) {
+    toast = document.createElement('div');
+    toast.className = 'toast';
+    document.body.appendChild(toast);
+  }
+  toast.textContent = message;
+  toast.classList.add('show');
+  setTimeout(() => toast.classList.remove('show'), 2000);
+}
+
+// ── Share button ──
+shareBtn.addEventListener('click', () => {
+  const url = window.location.href;
+  navigator.clipboard.writeText(url).then(() => {
+    showToast('Link copied');
+  });
+});
+
 // ── Settings UI ──
 settingsBtn.addEventListener('click', () => {
   settingsPanel.classList.toggle('hidden');
@@ -153,7 +287,7 @@ function initUnitToggle() {
       );
       // Re-fetch if we have a current location
       if (currentLocation) {
-        fetchWeather(currentLocation.lat, currentLocation.lon, currentLocation.name, { silent: true });
+        fetchWeather(currentLocation.lat, currentLocation.lon, currentLocation.name, { silent: true, force: true });
       }
     });
   });
@@ -166,7 +300,7 @@ function initUnitToggle() {
         settings[key] = select.value;
         saveSettings(settings);
         if (currentLocation) {
-          fetchWeather(currentLocation.lat, currentLocation.lon, currentLocation.name, { silent: true });
+          fetchWeather(currentLocation.lat, currentLocation.lon, currentLocation.name, { silent: true, force: true });
         }
       });
     }
@@ -385,9 +519,9 @@ document.addEventListener('click', (e) => {
 });
 
 // ── Weather fetching ──
-async function fetchWeather(lat, lon, name, { silent = false } = {}) {
+async function fetchWeather(lat, lon, name, { silent = false, force = false } = {}) {
   // Skip if same location and data is still fresh (avoids duplicate calls)
-  if (silent && latestWeatherData && currentLocation &&
+  if (silent && !force && latestWeatherData && currentLocation &&
     currentLocation.lat === lat && currentLocation.lon === lon &&
     Date.now() - lastFetchTime < STALE_MS) {
     return;
@@ -766,7 +900,7 @@ function renderDaily(data) {
 
   for (let i = 0; i < days.length; i++) {
     const dt = new Date(days[i] + 'T00:00:00');
-    const [icon] = weatherInfo(data.daily.weather_code[i]);
+    const icon = getDailyIcon(data, days[i]);
     const high = Math.round(data.daily.temperature_2m_max[i]);
     const low = Math.round(data.daily.temperature_2m_min[i]);
     const dWind = Math.round(data.daily.wind_speed_10m_max[i]);
@@ -972,7 +1106,10 @@ window.addEventListener('hashchange', () => {
   if (loc) fetchWeather(loc.lat, loc.lon, loc.name);
 });
 
-(function init() {
+(async function init() {
+  // Detect country-based defaults on first use
+  await detectCountryDefaults();
+
   // URL hash takes priority (shared link)
   const hashLoc = parseLocationHash();
   if (hashLoc) {

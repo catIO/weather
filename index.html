@@ -22,11 +22,13 @@
     <!-- Search -->
     <header>
       <div class="search-box">
+        <span class="material-icons search-leading-icon">search</span>
         <input type="text" id="searchInput" placeholder="Search location..." autocomplete="off" />
-        <button id="searchBtn" aria-label="Search"><span class="material-icons">search</span></button>
-        <button id="geoBtn" aria-label="Use my location"><span class="material-icons">my_location</span></button>
-        <button id="settingsBtn" aria-label="Settings"><span class="material-icons">settings</span></button>
+        <button id="searchBtn" class="search-trailing-btn hidden" aria-label="Search"><span class="material-icons">search</span></button>
+        <button id="geoBtn" class="search-trailing-btn" aria-label="Use my location"><span class="material-icons">my_location</span></button>
       </div>
+      <button id="shareBtn" class="header-icon-btn" aria-label="Share"><span class="material-icons">share</span></button>
+      <button id="settingsBtn" class="header-icon-btn" aria-label="Settings"><span class="material-icons">settings</span></button>
       <div id="suggestions" class="suggestions hidden"></div>
     </header>
 
