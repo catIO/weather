@@ -166,6 +166,7 @@ header {
 
 .search-box {
   flex: 1;
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: 4px;
@@ -659,6 +660,21 @@ header {
 
 /* Responsive */
 @media (max-width: 560px) {
+  header {
+    gap: 8px;
+  }
+
+  .search-box {
+    height: 48px;
+    padding: 0 12px;
+  }
+
+  .header-icon-btn {
+    width: 40px;
+    height: 40px;
+    border-radius: 10px;
+  }
+
   .current-details {
     grid-template-columns: repeat(2, 1fr);
   }
