@@ -727,7 +727,7 @@ function renderCurrent(data, name) {
     const pm2_5 = data.aqi.current.pm2_5;
     if ((aqiVal >= 100 || pm2_5 >= 35) && [0, 1, 2, 3, 45, 48].includes(code)) {
       icon = '😶‍🌫️';
-      desc = aqiVal >= 150 ? 'Dense Smoke/Haze' : 'Haze (Smoke)';
+      desc = aqiVal >= 150 ? 'Dense Haze' : 'Haze';
     }
   }
 
