@@ -170,6 +170,7 @@ const stormAlertIconEl = $('stormAlertIcon');
 const stormAlertTitleEl = $('stormAlertTitle');
 const stormAlertDetailEl = $('stormAlertDetail');
 let latestWeatherData = null;
+let latestAlerts = [];
 
 // ── Settings (localStorage) ──
 // Country-based unit defaults (applied only on first use)
@@ -537,6 +538,7 @@ async function fetchWeather(lat, lon, name, { silent = false, force = false } = 
     hideWeather();
   }
   currentLocation = { lat, lon, name };
+  latestAlerts = [];
   lastFetchTime = Date.now();
   localStorage.setItem('weather_last_fetch_time', String(lastFetchTime));
   localStorage.setItem('weather_last_location', JSON.stringify(currentLocation));
@@ -801,6 +803,7 @@ async function fetchNWSAlerts(lat, lon) {
       // Non-US location or API issue — just hide the alert
       stormAlertEl.classList.add('hidden');
       stormAlertEl.classList.remove('storm-severe');
+      latestAlerts = [];
       return;
     }
     const json = await res.json();
@@ -809,19 +812,45 @@ async function fetchNWSAlerts(lat, lon) {
     // Network error — silently hide alert
     stormAlertEl.classList.add('hidden');
     stormAlertEl.classList.remove('storm-severe');
+    latestAlerts = [];
   }
+}
+
+function cleanAlertText(text) {
+  if (!text) return '';
+  return text
+    .replace(/\s*(?:by|issued by)\s+(?:NWS|National Weather Service)\s+[A-Za-z0-9/&,\s-]+?(?=\.|$|\.\.\.)/gi, '')
+    .trim();
 }
 
 function renderNWSAlert(features) {
   // Filter to active alerts (use ends or expires as expiry)
   const now = new Date();
-  const alerts = features
-    .map((f) => f.properties)
+  let alerts = features
+    .map((f) => {
+      const p = f.properties;
+      return {
+        ...p,
+        headline: cleanAlertText(p.headline),
+        description: cleanAlertText(p.description),
+      };
+    })
     .filter((p) => {
       if (p.status !== 'Actual') return false;
       const expiry = p.ends || p.expires;
       return !expiry || new Date(expiry) > now;
     });
+
+  // Keep only the latest alert if there are multiple of the same event
+  alerts.sort((a, b) => new Date(b.sent || 0) - new Date(a.sent || 0));
+  const seenEvents = new Set();
+  alerts = alerts.filter((a) => {
+    if (seenEvents.has(a.event)) return false;
+    seenEvents.add(a.event);
+    return true;
+  });
+
+  latestAlerts = alerts;
 
   if (alerts.length === 0) {
     stormAlertEl.classList.add('hidden');
@@ -838,6 +867,7 @@ function renderNWSAlert(features) {
 
   stormAlertEl.classList.remove('hidden');
   stormAlertEl.classList.toggle('storm-severe', isSevere);
+  stormAlertIconEl.textContent = '⚠️';
   stormAlertIconEl.style.display = isSevere ? 'block' : 'none';
   stormAlertTitleEl.textContent = top.event;
   stormAlertDetailEl.textContent = top.headline || top.description?.slice(0, 120) || '';
@@ -1291,6 +1321,28 @@ function generateActivityOutlook(data) {
     <div style="font-size:14px; line-height:1.5; color:var(--text-muted); background:${precipBg}; border:${precipBorder}; padding:${precipPadding}; border-radius:${precipRadius};">${precipText}</div>
   </div>`;
 
+  // 2b. Active Weather Alerts (NWS)
+  if (latestAlerts && latestAlerts.length > 0) {
+    const alertsList = latestAlerts.map(alert => {
+      let color = "var(--storm)";
+      let border = "var(--storm-border)";
+      let bg = "var(--storm-bg)";
+      if (alert.severity === "Extreme" || alert.severity === "Severe") {
+        color = "var(--storm-severe)";
+        border = "var(--storm-severe-border)";
+        bg = "var(--storm-severe-bg)";
+      }
+      return `<div style="font-size:14px; line-height:1.5; color:var(--text-muted); background:${bg}; border:1px solid ${border}; padding:10px 12px; border-radius:8px; margin-bottom:8px;">
+        <strong style="color: ${color};">${alert.event}:</strong> ${alert.headline || alert.description?.slice(0, 120) || ''}
+      </div>`;
+    }).join('');
+
+    html += `<div>
+      <h3 style="margin:0 0 6px; font-size:12px; text-transform:uppercase; color:var(--text-muted); letter-spacing:0.5px;">Active Alerts</h3>
+      ${alertsList}
+    </div>`;
+  }
+
   // 3. Wind & Activity Recommendation
   let windText = "";
   let windThreshold = settings.windUnit === 'kmh' ? 24 : (settings.windUnit === 'ms' ? 6 : 15);
@@ -1356,15 +1408,37 @@ function generateActivityOutlook(data) {
     reasons.push("breezy winds");
   }
 
-  if (precipSeverity === "severe" || maxTemp >= hotThreshold || minTemp <= deepFreezeThreshold) {
+  let alertDangerous = false;
+  let alertPoor = false;
+  let alertFair = false;
+
+  if (latestAlerts && latestAlerts.length > 0) {
+    latestAlerts.forEach(alert => {
+      const eventLower = alert.event.toLowerCase();
+      const severity = alert.severity;
+
+      if (severity === "Extreme" || severity === "Severe") {
+        alertDangerous = true;
+        reasons.push(`active ${alert.event}`);
+      } else if (severity === "Moderate" || eventLower.includes("air quality")) {
+        alertPoor = true;
+        reasons.push(`active ${alert.event}`);
+      } else {
+        alertFair = true;
+        reasons.push(`active ${alert.event}`);
+      }
+    });
+  }
+
+  if (precipSeverity === "severe" || maxTemp >= hotThreshold || minTemp <= deepFreezeThreshold || alertDangerous) {
     rating = "Dangerous";
     ratingColor = "var(--storm-severe)";
     reason = `Dangerous conditions due to ${reasons.join(' and ')}.`;
-  } else if (precipSeverity === "warning" || maxGusts > gustThreshold) {
+  } else if (precipSeverity === "warning" || maxGusts > gustThreshold || alertPoor) {
     rating = "Poor";
     ratingColor = "var(--storm)";
     reason = `Unfavorable weather due to ${reasons.join(' and ')}.`;
-  } else if (precipSeverity === "watch" || maxWind > windThreshold || maxTemp >= warmThreshold || minTemp <= coldThreshold) {
+  } else if (precipSeverity === "watch" || maxWind > windThreshold || maxTemp >= warmThreshold || minTemp <= coldThreshold || alertFair) {
     rating = "Fair";
     ratingColor = "var(--accent)";
     reason = `Moderate conditions due to ${reasons.join(' and ')}.`;
