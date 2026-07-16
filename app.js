@@ -1019,7 +1019,7 @@ function renderHourly(data) {
 
     let aqiHtml = '';
     let aqiTooltip = '';
-    if (hourlyAqi != null) {
+    if (hourlyAqi != null && (hourlyAqi >= 100 || hourlyPm25 >= 35)) {
       let aqiColor = '#81c784'; // Good
       if (hourlyAqi > 300) aqiColor = '#7e0023';
       else if (hourlyAqi > 200) aqiColor = '#8f3f97';
@@ -1194,7 +1194,7 @@ function renderDayHourly(container, data, dayStr) {
 
     let aqiHtml = '';
     let aqiTooltip = '';
-    if (hourlyAqi != null) {
+    if (hourlyAqi != null && (hourlyAqi >= 100 || hourlyPm25 >= 35)) {
       let aqiColor = '#81c784'; // Good
       if (hourlyAqi > 300) aqiColor = '#7e0023';
       else if (hourlyAqi > 200) aqiColor = '#8f3f97';
@@ -1550,7 +1550,7 @@ function generateActivityOutlook(data) {
 
   // 2c. Air Quality Outlook
   let aqiSection = "";
-  if (maxAqiInWindow > 0) {
+  if (maxAqiInWindow >= 100) {
     let aqiSeverityClass = "none";
     let aqiText = `Air quality is expected to be good (peak AQI ${maxAqiInWindow}).`;
 
