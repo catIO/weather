@@ -55,10 +55,22 @@ function getDailyIcon(data, dayStr) {
   const daytimeHours = [];
   for (let h = 0; h < hourlyTimes.length; h++) {
     if (hourlyTimes[h] >= daytimeStart && hourlyTimes[h] <= daytimeEnd) {
+      let hourlyAqi = null;
+      let hourlyPm25 = null;
+      if (data.aqi && data.aqi.hourly) {
+        const timeStr = hourlyTimes[h];
+        const aqiIdx = data.aqi.hourly.time.indexOf(timeStr);
+        if (aqiIdx !== -1) {
+          hourlyAqi = data.aqi.hourly.us_aqi[aqiIdx];
+          hourlyPm25 = data.aqi.hourly.pm2_5[aqiIdx];
+        }
+      }
       daytimeHours.push({
         code: data.hourly.weather_code[h],
         precip: data.hourly.precipitation_probability[h] || 0,
         cape: data.hourly.cape ? data.hourly.cape[h] : 0,
+        aqi: hourlyAqi,
+        pm2_5: hourlyPm25,
       });
     }
   }
@@ -75,9 +87,10 @@ function getDailyIcon(data, dayStr) {
   let rainHours = 0;
   let cloudyHours = 0;
   let clearHours = 0;
+  let smokyHours = 0;
 
   for (const hr of daytimeHours) {
-    const { code, precip, cape } = hr;
+    const { code, precip, cape, aqi, pm2_5 } = hr;
     if ([95, 96, 99].includes(code) || (cape >= 500 && precip >= 40)) {
       thunderHours++;
     } else if (code >= 51 && precip >= 30) {
@@ -87,6 +100,9 @@ function getDailyIcon(data, dayStr) {
       // Borderline rain — count as half cloud, half rain
       rainHours += 0.5;
       cloudyHours += 0.5;
+    } else if (aqi != null && (aqi >= 100 || pm2_5 >= 35) && (code <= 3 || code === 45 || code === 48)) {
+      // Haze/smoke overrides clear/partly cloudy/foggy skies
+      smokyHours++;
     } else if (code >= 2 || (precip >= 20 && precip < 30)) {
       cloudyHours++;
     } else {
@@ -106,13 +122,16 @@ function getDailyIcon(data, dayStr) {
   if (rainHours / total >= 0.2) {
     return '🌦️';
   }
+  if (smokyHours >= 2 || smokyHours / total >= 0.15) {
+    return '😶‍🌫️';
+  }
   if (cloudyHours / total >= 0.7) {
     return '☁️';
   }
   if (cloudyHours / total >= 0.4) {
     return '⛅';
   }
-  if (cloudyHours / total >= 0.2 || clearHours < total) {
+  if (cloudyHours / total >= 0.2 || (clearHours + smokyHours) < total) {
     return '🌤️';
   }
   return '☀️';
@@ -567,9 +586,33 @@ async function fetchWeather(lat, lon, name, { silent = false, force = false } = 
       timezone: 'auto',
     });
 
-    const res = await fetch(`https://api.open-meteo.com/v1/forecast?${params}`);
-    if (!res.ok) throw new Error('Weather API error');
-    const data = await res.json();
+    const weatherUrl = `https://api.open-meteo.com/v1/forecast?${params}`;
+    const aqiUrl = `https://air-quality-api.open-meteo.com/v1/air-quality?latitude=${lat}&longitude=${lon}&current=us_aqi,pm2_5,pm10&hourly=us_aqi,pm2_5,pm10&forecast_days=7&timezone=auto`;
+
+    let data, aqiData = null;
+    const [weatherRes, aqiRes] = await Promise.all([
+      fetch(weatherUrl),
+      fetch(aqiUrl).catch(err => {
+        console.warn('AQI fetch failed:', err);
+        return null;
+      })
+    ]);
+
+    if (!weatherRes.ok) throw new Error('Weather API error');
+    data = await weatherRes.json();
+
+    if (aqiRes && aqiRes.ok) {
+      try {
+        aqiData = await aqiRes.json();
+      } catch (e) {
+        console.warn('Failed to parse AQI JSON:', e);
+      }
+    }
+
+    if (aqiData) {
+      data.aqi = aqiData;
+    }
+
     latestWeatherData = data;
 
     renderCurrent(data, name);
@@ -580,7 +623,8 @@ async function fetchWeather(lat, lon, name, { silent = false, force = false } = 
 
     // Fetch NWS alerts (US only, non-blocking)
     fetchNWSAlerts(lat, lon);
-  } catch {
+  } catch (err) {
+    console.error(err);
     if (!hasData) {
       showError('Failed to fetch weather data. Please try again.');
     }
@@ -675,7 +719,17 @@ function renderCurrent(data, name) {
   const c = data.current;
   const code = deriveCurrentCode(data);
 
-  const [icon, desc] = weatherInfo(code);
+  let [icon, desc] = weatherInfo(code);
+
+  // Override weather icon and description if AQI is elevated (indicating smoke/haze)
+  if (data.aqi && data.aqi.current) {
+    const aqiVal = data.aqi.current.us_aqi;
+    const pm2_5 = data.aqi.current.pm2_5;
+    if ((aqiVal >= 100 || pm2_5 >= 35) && [0, 1, 2, 3, 45, 48].includes(code)) {
+      icon = '😶‍🌫️';
+      desc = aqiVal >= 150 ? 'Dense Smoke/Haze' : 'Haze (Smoke)';
+    }
+  }
 
   $('cityName').textContent = name;
   const now = new Date();
@@ -735,6 +789,53 @@ function renderCurrent(data, name) {
 
   $('uvIndex').textContent = c.uv_index != null ? Math.round(c.uv_index) : '—';
 
+  // Air Quality index tile
+  const aqiValueSpan = $('aqiValue');
+  const aqiDescSpan = $('aqiDesc');
+  const aqiTile = aqiValueSpan.closest('.detail');
+  
+  if (data.aqi && data.aqi.current) {
+    const aqiVal = data.aqi.current.us_aqi;
+    const pm2_5 = data.aqi.current.pm2_5;
+    
+    // Only show Air Quality tile if levels are elevated (AQI >= 100 or PM2.5 >= 35)
+    const showTile = (aqiVal >= 100 || pm2_5 >= 35);
+    aqiTile.classList.toggle('hidden', !showTile);
+    
+    aqiValueSpan.textContent = aqiVal != null ? Math.round(aqiVal) : '—';
+    
+    let aqiLabel = 'Good';
+    let aqiColor = '#81c784';
+    if (aqiVal > 300) {
+      aqiLabel = 'Hazardous';
+      aqiColor = '#7e0023';
+    } else if (aqiVal > 200) {
+      aqiLabel = 'Very Unhealthy';
+      aqiColor = '#8f3f97';
+    } else if (aqiVal > 150) {
+      aqiLabel = 'Unhealthy';
+      aqiColor = 'var(--storm-severe)';
+    } else if (aqiVal > 100) {
+      aqiLabel = 'Unhealthy for Sens.';
+      aqiColor = 'var(--storm)';
+    } else if (aqiVal > 50) {
+      aqiLabel = 'Moderate';
+      aqiColor = '#ffeb3b';
+    }
+    
+    aqiDescSpan.textContent = aqiLabel;
+    aqiDescSpan.style.color = aqiColor;
+    aqiDescSpan.style.display = 'block';
+    
+    aqiTile.classList.toggle('elevated-severe', aqiVal >= 150);
+    aqiTile.classList.toggle('elevated', aqiVal >= 101 && aqiVal < 150);
+  } else {
+    aqiTile.classList.add('hidden');
+    aqiValueSpan.textContent = '—';
+    aqiDescSpan.style.display = 'none';
+    aqiTile.classList.remove('elevated', 'elevated-severe');
+  }
+
   // Precip Rate
   const precip = c.precipitation ?? 0;
   const precipUnitLabel = settings.precipUnit === 'inch' ? 'in/hr' : 'mm/hr';
@@ -788,6 +889,9 @@ function renderCurrent(data, name) {
   const pressureTile = $('pressure').closest('.detail');
   pressureTile.classList.toggle('elevated', trend === 'Falling fast');
   pressureTile.classList.remove('elevated-severe');
+
+  // Update browser tab favicon dynamically to match the current condition emoji
+  updateFavicon(icon);
 
   currentEl.classList.remove('hidden');
 }
@@ -891,20 +995,52 @@ function renderHourly(data) {
     const precip = data.hourly.precipitation_probability[idx] ?? 0;
     const cape = data.hourly.cape?.[idx] ?? 0;
     const code = data.hourly.weather_code[idx];
-    const icon = getHourlyIcon(code, precip, cape);
-    const temp = Math.round(data.hourly.temperature_2m[idx]);
 
-    const div = document.createElement('div');
-    div.className = 'hourly-item';
+    // Find matching AQI hourly data
+    let hourlyAqi = null;
+    let hourlyPm25 = null;
+    if (data.aqi && data.aqi.hourly) {
+      const timeStr = times[idx];
+      const aqiIdx = data.aqi.hourly.time.indexOf(timeStr);
+      if (aqiIdx !== -1) {
+        hourlyAqi = data.aqi.hourly.us_aqi[aqiIdx];
+        hourlyPm25 = data.aqi.hourly.pm2_5[aqiIdx];
+      }
+    }
+
+    let icon = getHourlyIcon(code, precip, cape);
+    if (hourlyAqi != null && (hourlyAqi >= 100 || hourlyPm25 >= 35) && [0, 1, 2, 3, 45, 48].includes(code)) {
+      icon = '😶‍🌫️';
+    }
+
+    const temp = Math.round(data.hourly.temperature_2m[idx]);
     const wind = Math.round(data.hourly.wind_speed_10m[idx]);
     const wdir = windDirection(data.hourly.wind_direction_10m[idx]);
 
+    let aqiHtml = '';
+    let aqiTooltip = '';
+    if (hourlyAqi != null) {
+      let aqiColor = '#81c784'; // Good
+      if (hourlyAqi > 300) aqiColor = '#7e0023';
+      else if (hourlyAqi > 200) aqiColor = '#8f3f97';
+      else if (hourlyAqi > 150) aqiColor = 'var(--storm-severe)';
+      else if (hourlyAqi > 100) aqiColor = 'var(--storm)';
+      else if (hourlyAqi > 50) aqiColor = '#ffeb3b';
+
+      aqiHtml = `<div class="h-aqi" style="font-size: 10px; margin-top: 6px; color: ${aqiColor}; font-weight: 500;">AQI ${hourlyAqi}</div>`;
+      aqiTooltip = ` · Air Quality: AQI ${hourlyAqi}`;
+    }
+
+    const div = document.createElement('div');
+    div.className = 'hourly-item';
+    div.title = `Wind: ${wind} ${wdir} · Precip Prob: ${precip}%${aqiTooltip}`;
     div.innerHTML = `
       <div class="hour">${i === 0 ? 'Now' : dt.toLocaleTimeString('en-US', { hour: 'numeric' })}</div>
       <div class="h-icon">${icon}</div>
       <div class="h-temp">${temp}°</div>
       <div class="h-precip${precip < 10 ? ' low-precip' : ''}"><span class="material-icons">water_drop</span> ${precip}%</div>
       <div class="h-wind"><span class="material-icons">air</span> ${wind} ${wdir}</div>
+      ${aqiHtml}
     `;
     fragment.appendChild(div);
   }
@@ -1034,24 +1170,78 @@ function renderDayHourly(container, data, dayStr) {
     const precip = data.hourly.precipitation_probability[idx] ?? 0;
     const cape = data.hourly.cape?.[idx] ?? 0;
     const code = data.hourly.weather_code[idx];
-    const icon = getHourlyIcon(code, precip, cape);
+
+    // Find matching AQI hourly data
+    let hourlyAqi = null;
+    let hourlyPm25 = null;
+    if (data.aqi && data.aqi.hourly) {
+      const timeStr = times[idx];
+      const aqiIdx = data.aqi.hourly.time.indexOf(timeStr);
+      if (aqiIdx !== -1) {
+        hourlyAqi = data.aqi.hourly.us_aqi[aqiIdx];
+        hourlyPm25 = data.aqi.hourly.pm2_5[aqiIdx];
+      }
+    }
+
+    let icon = getHourlyIcon(code, precip, cape);
+    if (hourlyAqi != null && (hourlyAqi >= 100 || hourlyPm25 >= 35) && [0, 1, 2, 3, 45, 48].includes(code)) {
+      icon = '😶‍🌫️';
+    }
+
     const temp = Math.round(data.hourly.temperature_2m[idx]);
     const wind = Math.round(data.hourly.wind_speed_10m[idx]);
     const wdir = windDirection(data.hourly.wind_direction_10m[idx]);
 
+    let aqiHtml = '';
+    let aqiTooltip = '';
+    if (hourlyAqi != null) {
+      let aqiColor = '#81c784'; // Good
+      if (hourlyAqi > 300) aqiColor = '#7e0023';
+      else if (hourlyAqi > 200) aqiColor = '#8f3f97';
+      else if (hourlyAqi > 150) aqiColor = 'var(--storm-severe)';
+      else if (hourlyAqi > 100) aqiColor = 'var(--storm)';
+      else if (hourlyAqi > 50) aqiColor = '#ffeb3b';
+
+      aqiHtml = `<div class="h-aqi" style="font-size: 10px; margin-top: 6px; color: ${aqiColor}; font-weight: 500;">AQI ${hourlyAqi}</div>`;
+      aqiTooltip = ` · Air Quality: AQI ${hourlyAqi}`;
+    }
+
     const div = document.createElement('div');
     div.className = 'hourly-item';
+    div.title = `Wind: ${wind} ${wdir} · Precip Prob: ${precip}%${aqiTooltip}`;
     div.innerHTML = `
       <div class="hour">${dt.toLocaleTimeString('en-US', { hour: 'numeric' })}</div>
       <div class="h-icon">${icon}</div>
       <div class="h-temp">${temp}°</div>
       <div class="h-precip${precip < 10 ? ' low-precip' : ''}"><span class="material-icons">water_drop</span> ${precip}%</div>
       <div class="h-wind"><span class="material-icons">air</span> ${wind} ${wdir}</div>
+      ${aqiHtml}
     `;
     scroll.appendChild(div);
   }
 
   container.appendChild(scroll);
+}
+
+function updateFavicon(emoji) {
+  try {
+    const canvas = document.createElement('canvas');
+    canvas.width = 32;
+    canvas.height = 32;
+    const ctx = canvas.getContext('2d');
+    ctx.font = '28px sans-serif';
+    ctx.textBaseline = 'middle';
+    ctx.textAlign = 'center';
+    ctx.fillText(emoji, 16, 16);
+
+    const dataUrl = canvas.toDataURL('image/png');
+    const links = document.querySelectorAll("link[rel*='icon']");
+    links.forEach(link => {
+      link.href = dataUrl;
+    });
+  } catch (e) {
+    console.error('Failed to update favicon:', e);
+  }
 }
 
 // ── Helpers ──
@@ -1173,6 +1363,21 @@ function generateActivityOutlook(data) {
   const indices = [];
   for (let i = 0; i < hoursToLook && (startIdx + i) < times.length; i++) {
     indices.push(startIdx + i);
+  }
+
+  // Check hourly AQI values in the forecast window (next 10 hours)
+  let maxAqiInWindow = 0;
+  if (data.aqi && data.aqi.hourly) {
+    indices.forEach(idx => {
+      const timeStr = times[idx];
+      const aqiIdx = data.aqi.hourly.time.indexOf(timeStr);
+      if (aqiIdx !== -1) {
+        const aqiVal = data.aqi.hourly.us_aqi[aqiIdx];
+        if (aqiVal != null && aqiVal > maxAqiInWindow) {
+          maxAqiInWindow = aqiVal;
+        }
+      }
+    });
   }
 
   let maxWind = 0;
@@ -1343,6 +1548,61 @@ function generateActivityOutlook(data) {
     </div>`;
   }
 
+  // 2c. Air Quality Outlook
+  let aqiSection = "";
+  if (maxAqiInWindow > 0) {
+    let aqiSeverityClass = "none";
+    let aqiText = `Air quality is expected to be good (peak AQI ${maxAqiInWindow}).`;
+
+    if (maxAqiInWindow > 300) {
+      aqiSeverityClass = "severe";
+      aqiText = `<strong style="color: #7e0023;">Hazardous Air Quality:</strong> Peak AQI of ${maxAqiInWindow} is expected. Everyone should avoid all outdoor physical activity.`;
+    } else if (maxAqiInWindow > 200) {
+      aqiSeverityClass = "severe";
+      aqiText = `<strong style="color: #8f3f97;">Very Unhealthy Air Quality:</strong> Peak AQI of ${maxAqiInWindow} is expected. Active children and adults, and people with respiratory disease, should avoid all outdoor exertion.`;
+    } else if (maxAqiInWindow > 150) {
+      aqiSeverityClass = "severe";
+      aqiText = `<strong style="color: var(--storm-severe);">Unhealthy Air Quality:</strong> Peak AQI of ${maxAqiInWindow} is expected. Outdoor activity should be limited.`;
+    } else if (maxAqiInWindow > 100) {
+      aqiSeverityClass = "warning";
+      aqiText = `<strong style="color: var(--storm);">Unhealthy for Sensitive Groups:</strong> Peak AQI of ${maxAqiInWindow} is expected. Sensitive individuals should reduce outdoor exertion.`;
+    } else if (maxAqiInWindow > 50) {
+      aqiSeverityClass = "watch";
+      aqiText = `Air quality is expected to be moderate (peak AQI ${maxAqiInWindow}).`;
+    }
+
+    let aqiBg = "transparent";
+    let aqiBorder = "none";
+    let aqiPadding = "0";
+    let aqiRadius = "0";
+
+    if (aqiSeverityClass === "severe") {
+      aqiBg = "var(--storm-severe-bg)";
+      aqiBorder = "1px solid var(--storm-severe-border)";
+      aqiPadding = "10px 12px";
+      aqiRadius = "8px";
+    } else if (aqiSeverityClass === "warning") {
+      aqiBg = "var(--storm-bg)";
+      aqiBorder = "1px solid var(--storm-border)";
+      aqiPadding = "10px 12px";
+      aqiRadius = "8px";
+    } else if (aqiSeverityClass === "watch") {
+      aqiBg = "rgba(79, 195, 247, 0.05)";
+      aqiBorder = "1px solid rgba(79, 195, 247, 0.2)";
+      aqiPadding = "10px 12px";
+      aqiRadius = "8px";
+    }
+
+    aqiSection = `<div>
+      <h3 style="margin:0 0 6px; font-size:12px; text-transform:uppercase; color:var(--text-muted); letter-spacing:0.5px;">Air Quality Outlook</h3>
+      <div style="font-size:14px; line-height:1.5; color:var(--text-muted); background:${aqiBg}; border:${aqiBorder}; padding:${aqiPadding}; border-radius:${aqiRadius};">${aqiText}</div>
+    </div>`;
+  }
+
+  if (aqiSection) {
+    html += aqiSection;
+  }
+
   // 3. Wind & Activity Recommendation
   let windText = "";
   let windThreshold = settings.windUnit === 'kmh' ? 24 : (settings.windUnit === 'ms' ? 6 : 15);
@@ -1408,6 +1668,14 @@ function generateActivityOutlook(data) {
     reasons.push("breezy winds");
   }
 
+  if (maxAqiInWindow >= 200) {
+    reasons.push(`very unhealthy air quality (AQI ${maxAqiInWindow})`);
+  } else if (maxAqiInWindow >= 150) {
+    reasons.push(`unhealthy air quality (AQI ${maxAqiInWindow})`);
+  } else if (maxAqiInWindow >= 100) {
+    reasons.push(`poor air quality (AQI ${maxAqiInWindow})`);
+  }
+
   let alertDangerous = false;
   let alertPoor = false;
   let alertFair = false;
@@ -1430,15 +1698,19 @@ function generateActivityOutlook(data) {
     });
   }
 
-  if (precipSeverity === "severe" || maxTemp >= hotThreshold || minTemp <= deepFreezeThreshold || alertDangerous) {
+  const isDangerous = precipSeverity === "severe" || maxTemp >= hotThreshold || minTemp <= deepFreezeThreshold || alertDangerous || maxAqiInWindow >= 200;
+  const isPoor = precipSeverity === "warning" || maxGusts > gustThreshold || alertPoor || maxAqiInWindow >= 100;
+  const isFair = precipSeverity === "watch" || maxWind > windThreshold || maxTemp >= warmThreshold || minTemp <= coldThreshold || alertFair || maxAqiInWindow > 50;
+
+  if (isDangerous) {
     rating = "Dangerous";
     ratingColor = "var(--storm-severe)";
     reason = `Dangerous conditions due to ${reasons.join(' and ')}.`;
-  } else if (precipSeverity === "warning" || maxGusts > gustThreshold || alertPoor) {
+  } else if (isPoor) {
     rating = "Poor";
     ratingColor = "var(--storm)";
     reason = `Unfavorable weather due to ${reasons.join(' and ')}.`;
-  } else if (precipSeverity === "watch" || maxWind > windThreshold || maxTemp >= warmThreshold || minTemp <= coldThreshold || alertFair) {
+  } else if (isFair) {
     rating = "Fair";
     ratingColor = "var(--accent)";
     reason = `Moderate conditions due to ${reasons.join(' and ')}.`;

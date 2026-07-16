@@ -12,17 +12,19 @@ A minimal weather PWA built with vanilla JavaScript. No frameworks, no build ste
 - Detail tiles highlight in amber/red when values are elevated or severe
 
 ### Smart Weather Detection
-- Derives current conditions from multiple data signals (minutely_15, hourly, current)
+- Derives current conditions from multiple data signals (minutely_15, hourly, current, air quality)
+- Integrates Open-Meteo Air Quality API to retrieve real-time US AQI, PM2.5, and PM10 measurements
+- Detects smoke and haze from elevated particulate levels and overrides clear weather descriptions/icons to show hazy conditions
 - Uses lightning potential index (LPI), CAPE, and precipitation to detect thunderstorms even when the base weather code lags
 - Thunderstorm alert banner with 2-hour lookahead
 
 ### Activity Outlook
-- AI-generated activity summary (tap the temperature to open)
+- Activity summary and safety recommendation adjusted for poor air quality (e.g., wildfire smoke) and severe hazards (tap the temperature to open)
 - Powered by a Netlify edge function
 
 ### Forecasts
-- 24-hour hourly forecast with precipitation probability and storm indicators
-- 10-day daily forecast with high/low temps and precip probability
+- 24-hour hourly forecast with precipitation probability, storm indicators, and hourly AQI levels
+- 10-day daily forecast with high/low temps, precip probability, and smoke/haze icon adjustments
 
 ### Settings & Units
 - Temperature: °F / °C
