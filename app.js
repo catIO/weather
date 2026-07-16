@@ -791,7 +791,6 @@ function renderCurrent(data, name) {
 
   // Air Quality index tile
   const aqiValueSpan = $('aqiValue');
-  const aqiDescSpan = $('aqiDesc');
   const aqiTile = aqiValueSpan.closest('.detail');
   
   if (data.aqi && data.aqi.current) {
@@ -804,35 +803,11 @@ function renderCurrent(data, name) {
     
     aqiValueSpan.textContent = aqiVal != null ? Math.round(aqiVal) : '—';
     
-    let aqiLabel = 'Good';
-    let aqiColor = '#81c784';
-    if (aqiVal > 300) {
-      aqiLabel = 'Hazardous';
-      aqiColor = '#7e0023';
-    } else if (aqiVal > 200) {
-      aqiLabel = 'Very Unhealthy';
-      aqiColor = '#8f3f97';
-    } else if (aqiVal > 150) {
-      aqiLabel = 'Unhealthy';
-      aqiColor = 'var(--storm-severe)';
-    } else if (aqiVal > 100) {
-      aqiLabel = 'Unhealthy for Sens.';
-      aqiColor = 'var(--storm)';
-    } else if (aqiVal > 50) {
-      aqiLabel = 'Moderate';
-      aqiColor = '#ffeb3b';
-    }
-    
-    aqiDescSpan.textContent = aqiLabel;
-    aqiDescSpan.style.color = aqiColor;
-    aqiDescSpan.style.display = 'block';
-    
     aqiTile.classList.toggle('elevated-severe', aqiVal >= 150);
     aqiTile.classList.toggle('elevated', aqiVal >= 101 && aqiVal < 150);
   } else {
     aqiTile.classList.add('hidden');
     aqiValueSpan.textContent = '—';
-    aqiDescSpan.style.display = 'none';
     aqiTile.classList.remove('elevated', 'elevated-severe');
   }
 
