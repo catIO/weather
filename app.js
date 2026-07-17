@@ -89,6 +89,9 @@ function getDailyIcon(data, dayStr) {
   let clearHours = 0;
   let smokyHours = 0;
 
+  // Only count smoky hours if WAQI current confirms poor air (>= 100)
+  const waqiGate = (data.aqi?.current?.us_aqi ?? 0) >= 100;
+
   for (const hr of daytimeHours) {
     const { code, precip, cape, aqi, pm2_5 } = hr;
     if ([95, 96, 99].includes(code) || (cape >= 500 && precip >= 40)) {
@@ -100,7 +103,7 @@ function getDailyIcon(data, dayStr) {
       // Borderline rain — count as half cloud, half rain
       rainHours += 0.5;
       cloudyHours += 0.5;
-    } else if (aqi != null && (aqi >= 100 || pm2_5 >= 35) && (code <= 3 || code === 45 || code === 48)) {
+    } else if (waqiGate && aqi != null && (aqi >= 100 || pm2_5 >= 35) && (code <= 3 || code === 45 || code === 48)) {
       // Haze/smoke overrides clear/partly cloudy/foggy skies
       smokyHours++;
     } else if (code >= 2 || (precip >= 20 && precip < 30)) {
@@ -754,13 +757,12 @@ function renderCurrent(data, name) {
 
   let [icon, desc] = weatherInfo(code);
 
-  // Override weather icon and description if AQI is elevated (indicating smoke/haze)
+  // Override weather icon and description only if AQI is very elevated (visible haze)
   if (data.aqi && data.aqi.current) {
     const aqiVal = data.aqi.current.us_aqi;
-    const pm2_5 = data.aqi.current.pm2_5;
-    if ((aqiVal >= 100 || pm2_5 >= 35) && [0, 1, 2, 3, 45, 48].includes(code)) {
+    if (aqiVal >= 150 && [0, 1, 2, 3, 45, 48].includes(code)) {
       icon = '😶‍🌫️';
-      desc = aqiVal >= 150 ? 'Dense Haze' : 'Haze';
+      desc = aqiVal >= 200 ? 'Dense Haze' : 'Haze';
     }
   }
 
