@@ -822,20 +822,16 @@ function renderCurrent(data, name) {
 
   $('uvIndex').textContent = c.uv_index != null ? Math.round(c.uv_index) : '—';
 
-  // Air Quality index tile
+  // Air Quality index tile — hidden until NWS alert confirms active warning
   const aqiValueSpan = $('aqiValue');
   const aqiTile = aqiValueSpan.closest('.detail');
 
   if (data.aqi && data.aqi.current) {
     const aqiVal = data.aqi.current.us_aqi;
-    const pm2_5 = data.aqi.current.pm2_5;
 
-    // Only show Air Quality tile if levels are elevated (AQI >= 100 or PM2.5 >= 35)
-    const showTile = (aqiVal >= 100 || pm2_5 >= 35);
-    aqiTile.classList.toggle('hidden', !showTile);
-
+    // Store value but hide tile — renderNWSAlert will show it if an alert is active
     aqiValueSpan.textContent = aqiVal != null ? Math.round(aqiVal) : '—';
-
+    aqiTile.classList.add('hidden');
     aqiTile.classList.toggle('elevated-severe', aqiVal >= 150);
     aqiTile.classList.toggle('elevated', aqiVal >= 101 && aqiVal < 150);
   } else {
@@ -981,6 +977,14 @@ function renderNWSAlert(features) {
   stormAlertEl.classList.toggle('storm-severe', isSevere);
   stormAlertTitleEl.textContent = top.event;
   stormAlertDetailEl.textContent = top.headline || top.description?.slice(0, 120) || '';
+
+  // Show AQI tile only when there's an active air quality alert OR WAQI >= 100
+  const aqiTile = $('aqiValue')?.closest('.detail');
+  const currentAqi = latestWeatherData?.aqi?.current?.us_aqi;
+  const hasAqAlert = alerts.some(a => /air quality/i.test(a.event));
+  if (aqiTile && currentAqi != null && (currentAqi >= 100 || hasAqAlert)) {
+    aqiTile.classList.remove('hidden');
+  }
 }
 
 function renderHourly(data) {
@@ -993,6 +997,10 @@ function renderHourly(data) {
   let startIdx = times.findIndex((t) => new Date(t) >= now);
   if (startIdx < 0) startIdx = 0;
 
+  // Only show hourly AQI when WAQI current reading is severe (>= 100)
+  const waqiCurrent = data.aqi?.current?.us_aqi;
+  const showHourlyAqi = waqiCurrent >= 100;
+
   // Show next 24 hours
   const count = Math.min(24, times.length - startIdx);
   for (let i = 0; i < count; i++) {
@@ -1002,10 +1010,10 @@ function renderHourly(data) {
     const cape = data.hourly.cape?.[idx] ?? 0;
     const code = data.hourly.weather_code[idx];
 
-    // Find matching AQI hourly data
+    // Find matching AQI hourly data (gated by WAQI current reading)
     let hourlyAqi = null;
     let hourlyPm25 = null;
-    if (data.aqi && data.aqi.hourly) {
+    if (showHourlyAqi && data.aqi && data.aqi.hourly) {
       const timeStr = times[idx];
       const aqiIdx = data.aqi.hourly.time.indexOf(timeStr);
       if (aqiIdx !== -1) {
