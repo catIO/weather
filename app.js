@@ -825,17 +825,17 @@ function renderCurrent(data, name) {
   // Air Quality index tile
   const aqiValueSpan = $('aqiValue');
   const aqiTile = aqiValueSpan.closest('.detail');
-  
+
   if (data.aqi && data.aqi.current) {
     const aqiVal = data.aqi.current.us_aqi;
     const pm2_5 = data.aqi.current.pm2_5;
-    
+
     // Only show Air Quality tile if levels are elevated (AQI >= 100 or PM2.5 >= 35)
     const showTile = (aqiVal >= 100 || pm2_5 >= 35);
     aqiTile.classList.toggle('hidden', !showTile);
-    
+
     aqiValueSpan.textContent = aqiVal != null ? Math.round(aqiVal) : '—';
-    
+
     aqiTile.classList.toggle('elevated-severe', aqiVal >= 150);
     aqiTile.classList.toggle('elevated', aqiVal >= 101 && aqiVal < 150);
   } else {
@@ -979,8 +979,6 @@ function renderNWSAlert(features) {
 
   stormAlertEl.classList.remove('hidden');
   stormAlertEl.classList.toggle('storm-severe', isSevere);
-  stormAlertIconEl.textContent = '⚠️';
-  stormAlertIconEl.style.display = isSevere ? 'block' : 'none';
   stormAlertTitleEl.textContent = top.event;
   stormAlertDetailEl.textContent = top.headline || top.description?.slice(0, 120) || '';
 }

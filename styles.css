@@ -43,8 +43,8 @@
   --storm-bg: rgba(255, 152, 0, 0.1);
   --storm-border: rgba(255, 152, 0, 0.4);
   --storm-severe: #f44336;
-  --storm-severe-bg: rgba(244, 67, 54, 0.12);
-  --storm-severe-border: rgba(244, 67, 54, 0.45);
+  --storm-severe-bg: rgba(244, 67, 54, 0.08);
+  --storm-severe-border: rgba(244, 67, 54, 0.3);
 }
 
 /* Thunderstorm Alert Banner */
@@ -71,14 +71,7 @@
 
 
 .storm-alert-icon {
-  font-size: 28px;
-  line-height: 1;
-  flex-shrink: 0;
-  filter: drop-shadow(0 0 6px var(--storm));
-}
-
-.storm-alert.storm-severe .storm-alert-icon {
-  filter: drop-shadow(0 0 8px var(--storm-severe));
+  display: none;
 }
 
 .storm-alert-body {
