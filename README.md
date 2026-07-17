@@ -49,24 +49,33 @@ Air Quality data defaults to the Open-Meteo Air Quality API (using CAMS forecast
 
 ## Running locally
 
-Serve the directory with any static file server:
+You can run the app locally in one of two modes:
 
+### 1. Static Fallback Mode (Default)
+Runs a simple static server. The app automatically falls back to Open-Meteo for air quality data.
 ```sh
 npx serve .
 ```
-
 Then open http://localhost:3000.
+
+### 2. High-Accuracy Proxy Mode
+Runs the Netlify serverless function emulator locally. Reads from your local `.env` file to fetch real-time WAQI telemetry.
+```sh
+npx netlify dev
+```
 
 ## Project structure
 
 ```
-index.html      Main page
-app.js          All application logic
-styles.css      Styles
-sw.js           Service worker (stale-while-revalidate caching)
-manifest.json   PWA manifest
-icons/          App icons
-docs/           Planning documents
+index.html          Main page
+app.js              All application logic
+styles.css          Styles
+sw.js               Service worker (stale-while-revalidate caching)
+manifest.json       PWA manifest
+icons/              App icons
+netlify/functions/  Netlify serverless functions (WAQI API proxy)
+.env                Local environment variables (git-ignored)
+docs/               Planning documents
 ```
 
 ## License
