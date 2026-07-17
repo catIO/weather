@@ -1,3 +1,7 @@
 node_modules/
 package-lock.json
 generate-icons.js
+.env
+
+# Local Netlify folder
+.netlify

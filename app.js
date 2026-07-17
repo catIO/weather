@@ -588,6 +588,7 @@ async function fetchWeather(lat, lon, name, { silent = false, force = false } = 
 
     const weatherUrl = `https://api.open-meteo.com/v1/forecast?${params}`;
     const aqiUrl = `https://air-quality-api.open-meteo.com/v1/air-quality?latitude=${lat}&longitude=${lon}&current=us_aqi,pm2_5,pm10&hourly=us_aqi,pm2_5,pm10&forecast_days=7&timezone=auto`;
+    const proxyAqiUrl = `/api/air-quality?lat=${lat}&lon=${lon}`;
 
     let data, aqiData = null;
     const [weatherRes, aqiRes] = await Promise.all([
@@ -611,6 +612,38 @@ async function fetchWeather(lat, lon, name, { silent = false, force = false } = 
 
     if (aqiData) {
       data.aqi = aqiData;
+    }
+
+    // Gating check: only fetch proxy if Open-Meteo data is missing or indicates elevated levels
+    const currentAqi = aqiData?.current?.us_aqi ?? 0;
+    const currentPm25 = aqiData?.current?.pm2_5 ?? 0;
+
+    if (!aqiData || currentAqi >= 80 || currentPm25 >= 25) {
+      try {
+        const proxyRes = await fetch(proxyAqiUrl);
+        if (proxyRes.ok) {
+          const proxyAqiData = await proxyRes.json();
+          if (proxyAqiData && proxyAqiData.status === 'ok' && proxyAqiData.data) {
+            const waqi = proxyAqiData.data;
+            if (data.aqi) {
+              if (!data.aqi.current) data.aqi.current = {};
+              data.aqi.current.us_aqi = waqi.aqi;
+              if (waqi.iaqi?.pm25) {
+                data.aqi.current.pm2_5 = waqi.iaqi.pm25.v;
+              }
+            } else {
+              data.aqi = {
+                current: {
+                  us_aqi: waqi.aqi,
+                  pm2_5: waqi.iaqi?.pm25 ? waqi.iaqi.pm25.v : 0
+                }
+              };
+            }
+          }
+        }
+      } catch (err) {
+        console.warn('Proxy AQI fetch failed (using Open-Meteo fallback):', err);
+      }
     }
 
     latestWeatherData = data;
