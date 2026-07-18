@@ -126,6 +126,9 @@ function getDailyIcon(data, dayStr) {
     return '🌦️';
   }
   if (smokyHours >= 2 || smokyHours / total >= 0.15) {
+    // If there is any active rain or thunder hours, prioritize showing it over haze
+    if (thunderHours > 0) return '⛈️';
+    if (rainHours > 0) return '🌦️';
     return '😶‍🌫️';
   }
   if (cloudyHours / total >= 0.7) {
@@ -681,6 +684,34 @@ function windLabel() {
 
 // ── Smart condition derivation using all available signals ──
 function deriveCurrentCode(data) {
+  // --- Priority 0: Active severe alert upgrade ---
+  if (latestAlerts && latestAlerts.length > 0) {
+    const activeAlert = latestAlerts.find(alert => {
+      const event = alert.event || '';
+      const headline = alert.headline || '';
+      const desc = alert.description || '';
+      const textToSearch = `${event} ${headline} ${desc}`;
+      return /thunderstorm|storm|flood|tornado|hurricane|tropical|gale|marine|rain|precipitation|shower|winter|snow|blizzard/i.test(textToSearch) 
+             && !/air quality|heat/i.test(textToSearch);
+    });
+
+    if (activeAlert) {
+      const event = activeAlert.event || '';
+      const headline = activeAlert.headline || '';
+      const desc = activeAlert.description || '';
+      const textToSearch = `${event} ${headline} ${desc}`;
+      if (/thunderstorm|tornado|hurricane|tropical|marine/i.test(textToSearch)) {
+        return 95; // Thunderstorm
+      }
+      if (/flood|rain|precipitation|shower/i.test(textToSearch)) {
+        return 65; // Heavy rain
+      }
+      if (/winter|snow|blizzard/i.test(textToSearch)) {
+        return 75; // Heavy snow
+      }
+    }
+  }
+
   const c = data.current;
   let code = c.weather_code;
   const precip = c.precipitation ?? 0; // mm or inch depending on unit
@@ -758,9 +789,15 @@ function renderCurrent(data, name) {
   let [icon, desc] = weatherInfo(code);
 
   // Override weather icon and description only if AQI is very elevated (visible haze)
+  // and there is no active severe weather/precipitation warning or watch.
   if (data.aqi && data.aqi.current) {
     const aqiVal = data.aqi.current.us_aqi;
-    if (aqiVal >= 150 && [0, 1, 2, 3, 45, 48].includes(code)) {
+    const hasRainOrStormAlert = latestAlerts && latestAlerts.some(alert => {
+      const event = alert.event || '';
+      return /thunderstorm|storm|flood|tornado|hurricane|tropical|gale|marine|rain|precipitation|shower/i.test(event) 
+             && !/air quality|heat/i.test(event);
+    });
+    if (aqiVal >= 150 && [0, 1, 2, 3, 45, 48].includes(code) && !hasRainOrStormAlert) {
       icon = '😶‍🌫️';
       desc = aqiVal >= 200 ? 'Dense Haze' : 'Haze';
     }
@@ -824,18 +861,24 @@ function renderCurrent(data, name) {
 
   $('uvIndex').textContent = c.uv_index != null ? Math.round(c.uv_index) : '—';
 
-  // Air Quality index tile — hidden until NWS alert confirms active warning
+  // Air Quality index tile
   const aqiValueSpan = $('aqiValue');
   const aqiTile = aqiValueSpan.closest('.detail');
 
   if (data.aqi && data.aqi.current) {
     const aqiVal = data.aqi.current.us_aqi;
 
-    // Store value but hide tile — renderNWSAlert will show it if an alert is active
     aqiValueSpan.textContent = aqiVal != null ? Math.round(aqiVal) : '—';
-    aqiTile.classList.add('hidden');
     aqiTile.classList.toggle('elevated-severe', aqiVal >= 150);
     aqiTile.classList.toggle('elevated', aqiVal >= 101 && aqiVal < 150);
+
+    // Show AQI tile only when there's an active air quality alert OR WAQI >= 100
+    const hasAqAlert = latestAlerts && latestAlerts.some(a => /air quality/i.test(a.event));
+    if (aqiVal >= 100 || hasAqAlert) {
+      aqiTile.classList.remove('hidden');
+    } else {
+      aqiTile.classList.add('hidden');
+    }
   } else {
     aqiTile.classList.add('hidden');
     aqiValueSpan.textContent = '—';
@@ -980,12 +1023,8 @@ function renderNWSAlert(features) {
   stormAlertTitleEl.textContent = top.event;
   stormAlertDetailEl.textContent = top.headline || top.description?.slice(0, 120) || '';
 
-  // Show AQI tile only when there's an active air quality alert OR WAQI >= 100
-  const aqiTile = $('aqiValue')?.closest('.detail');
-  const currentAqi = latestWeatherData?.aqi?.current?.us_aqi;
-  const hasAqAlert = alerts.some(a => /air quality/i.test(a.event));
-  if (aqiTile && currentAqi != null && (currentAqi >= 100 || hasAqAlert)) {
-    aqiTile.classList.remove('hidden');
+  if (latestWeatherData && currentLocation) {
+    renderCurrent(latestWeatherData, currentLocation.name);
   }
 }
 
@@ -1025,7 +1064,8 @@ function renderHourly(data) {
     }
 
     let icon = getHourlyIcon(code, precip, cape);
-    if (hourlyAqi != null && (hourlyAqi >= 100 || hourlyPm25 >= 35) && [0, 1, 2, 3, 45, 48].includes(code)) {
+    const isRainOrStormIcon = ['⛈️', '🌧️', '🌦️', '🌨️'].includes(icon);
+    if (hourlyAqi != null && (hourlyAqi >= 100 || hourlyPm25 >= 35) && [0, 1, 2, 3, 45, 48].includes(code) && !isRainOrStormIcon) {
       icon = '😶‍🌫️';
     }
 
@@ -1200,7 +1240,8 @@ function renderDayHourly(container, data, dayStr) {
     }
 
     let icon = getHourlyIcon(code, precip, cape);
-    if (hourlyAqi != null && (hourlyAqi >= 100 || hourlyPm25 >= 35) && [0, 1, 2, 3, 45, 48].includes(code)) {
+    const isRainOrStormIcon = ['⛈️', '🌧️', '🌦️', '🌨️'].includes(icon);
+    if (hourlyAqi != null && (hourlyAqi >= 100 || hourlyPm25 >= 35) && [0, 1, 2, 3, 45, 48].includes(code) && !isRainOrStormIcon) {
       icon = '😶‍🌫️';
     }
 
