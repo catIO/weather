@@ -688,6 +688,9 @@ function deriveCurrentCode(data) {
   if (latestAlerts && latestAlerts.length > 0) {
     const activeAlert = latestAlerts.find(alert => {
       const event = alert.event || '';
+      // Ignore watches (e.g. Flood Watch, Severe Thunderstorm Watch) for current condition upgrades
+      if (/watch/i.test(event)) return false;
+
       const headline = alert.headline || '';
       const desc = alert.description || '';
       const textToSearch = `${event} ${headline} ${desc}`;
@@ -698,15 +701,15 @@ function deriveCurrentCode(data) {
     if (activeAlert) {
       const event = activeAlert.event || '';
       const headline = activeAlert.headline || '';
-      const desc = activeAlert.description || '';
-      const textToSearch = `${event} ${headline} ${desc}`;
-      if (/thunderstorm|tornado|hurricane|tropical|marine/i.test(textToSearch)) {
+      // Classify the current weather using event and headline rather than the description body
+      const classificationText = `${event} ${headline}`;
+      if (/thunderstorm|tornado|hurricane|tropical|marine/i.test(classificationText)) {
         return 95; // Thunderstorm
       }
-      if (/flood|rain|precipitation|shower/i.test(textToSearch)) {
+      if (/flood|rain|precipitation|shower/i.test(classificationText)) {
         return 65; // Heavy rain
       }
-      if (/winter|snow|blizzard/i.test(textToSearch)) {
+      if (/winter|snow|blizzard/i.test(classificationText)) {
         return 75; // Heavy snow
       }
     }
