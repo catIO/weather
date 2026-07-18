@@ -799,7 +799,12 @@ function renderCurrent(data, name) {
     });
     if (aqiVal >= 150 && [0, 1, 2, 3, 45, 48].includes(code) && !hasRainOrStormAlert) {
       icon = '😶‍🌫️';
-      desc = aqiVal >= 200 ? 'Dense Haze' : 'Haze';
+      const isSmoke = latestAlerts && latestAlerts.some(alert => {
+        const text = `${alert.event || ''} ${alert.headline || ''} ${alert.description || ''}`;
+        return /smoke|wildfire/i.test(text);
+      });
+      const name = isSmoke ? 'Smoke' : 'Haze';
+      desc = aqiVal >= 200 ? `Dense ${name}` : name;
     }
   }
 
