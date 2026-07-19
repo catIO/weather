@@ -878,7 +878,7 @@ function renderCurrent(data, name) {
   $('currentTemp').textContent = `${Math.round(temp)}${unitLabel()}`;
   $('weatherDesc').textContent = desc;
   $('dewPoint').textContent = `${Math.round(dewPoint)}${unitLabel()}`;
-  $('humidity').textContent = `${humidity}%`;
+  $('humidity').textContent = `${Math.round(humidity)}%`;
   const windSpeedVal = Math.round(windSpeed);
   const gustsSpan = $('windGusts');
   if (gusts != null && gusts > windSpeedVal) {
