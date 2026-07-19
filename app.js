@@ -196,6 +196,7 @@ const stormAlertTitleEl = $('stormAlertTitle');
 const stormAlertDetailEl = $('stormAlertDetail');
 let latestWeatherData = null;
 let latestAlerts = [];
+let latestNWSObservation = null;
 
 // ── Settings (localStorage) ──
 // Country-based unit defaults (applied only on first use)
@@ -564,6 +565,7 @@ async function fetchWeather(lat, lon, name, { silent = false, force = false } = 
   }
   currentLocation = { lat, lon, name };
   latestAlerts = [];
+  latestNWSObservation = null;
   lastFetchTime = Date.now();
   localStorage.setItem('weather_last_fetch_time', String(lastFetchTime));
   localStorage.setItem('weather_last_location', JSON.stringify(currentLocation));
@@ -598,8 +600,8 @@ async function fetchWeather(lat, lon, name, { silent = false, force = false } = 
 
     let data, aqiData = null;
     const [weatherRes, aqiRes] = await Promise.all([
-      fetch(weatherUrl),
-      fetch(aqiUrl).catch(err => {
+      fetch(weatherUrl, { cache: 'no-cache' }),
+      fetch(aqiUrl, { cache: 'no-cache' }).catch(err => {
         console.warn('AQI fetch failed:', err);
         return null;
       })
@@ -660,8 +662,9 @@ async function fetchWeather(lat, lon, name, { silent = false, force = false } = 
     lastFetchTime = Date.now();
     localStorage.setItem('weather_last_fetch_time', String(lastFetchTime));
 
-    // Fetch NWS alerts (US only, non-blocking)
+    // Fetch NWS alerts and observations (US only, non-blocking)
     fetchNWSAlerts(lat, lon);
+    fetchNWSObservation(lat, lon);
   } catch (err) {
     console.error(err);
     if (!hasData) {
@@ -688,8 +691,8 @@ function deriveCurrentCode(data) {
   if (latestAlerts && latestAlerts.length > 0) {
     const activeAlert = latestAlerts.find(alert => {
       const event = alert.event || '';
-      // Ignore watches (e.g. Flood Watch, Severe Thunderstorm Watch) for current condition upgrades
-      if (/watch/i.test(event)) return false;
+      // Ignore watches (e.g. Flood Watch) unless they are convective (Tornado Watch, Severe Thunderstorm Watch)
+      if (/watch/i.test(event) && !/tornado|severe thunderstorm/i.test(event)) return false;
 
       const headline = alert.headline || '';
       const desc = alert.description || '';
@@ -701,8 +704,9 @@ function deriveCurrentCode(data) {
     if (activeAlert) {
       const event = activeAlert.event || '';
       const headline = activeAlert.headline || '';
-      // Classify the current weather using event and headline rather than the description body
-      const classificationText = `${event} ${headline}`;
+      const desc = activeAlert.description || '';
+      // Classify the current weather using event, headline, and description for active non-watch alerts
+      const classificationText = `${event} ${headline} ${desc}`;
       if (/thunderstorm|tornado|hurricane|tropical|marine/i.test(classificationText)) {
         return 95; // Thunderstorm
       }
@@ -713,6 +717,11 @@ function deriveCurrentCode(data) {
         return 75; // Heavy snow
       }
     }
+  }
+
+  // --- Priority 0.5: NWS Ground-Station Observation override ───
+  if (latestNWSObservation && latestNWSObservation.weatherCode !== null) {
+    return latestNWSObservation.weatherCode;
   }
 
   const c = data.current;
@@ -736,29 +745,44 @@ function deriveCurrentCode(data) {
   let nearLPI = 0;
   let nearCape = 0;
   let m15StormCode = null;
+  let m15PrecipCode = null;
   for (const i of m15Window) {
     if (lpiArr[i] != null && lpiArr[i] > nearLPI) nearLPI = lpiArr[i];
     if (capeM15[i] != null && capeM15[i] > nearCape) nearCape = capeM15[i];
     if ([95, 96, 99].includes(codeM15[i]) && m15StormCode === null) {
       m15StormCode = codeM15[i];
     }
+    if (codeM15[i] >= 51 && m15PrecipCode === null) {
+      m15PrecipCode = codeM15[i];
+    }
   }
 
-  // Also grab hourly CAPE for the current hour
+  // Also grab hourly CAPE and weather code for the current hour
   const hourTimes = data.hourly?.time ?? [];
   const capeHourly = data.hourly?.cape ?? [];
+  const codeHourly = data.hourly?.weather_code ?? [];
   let hIdx = hourTimes.findIndex((t) => new Date(t) >= now);
   if (hIdx < 0) hIdx = Math.max(0, hourTimes.length - 1);
   const hourlyCape = capeHourly[hIdx] ?? 0;
+  const hourlyCode = codeHourly[hIdx] ?? null;
   const maxCape = Math.max(nearCape, hourlyCape);
 
   // --- Priority 1: Thunderstorm upgrade ---
   // If minutely_15 reports a storm code right now, trust it
   if (m15StormCode !== null) return m15StormCode;
-  // If active lightning potential + precip, it's a thunderstorm
-  if (nearLPI > 0 && precip > 0) return 95;
+  // If active lightning potential, it's a thunderstorm (even if precip sensor lags)
+  if (nearLPI > 0) return 95;
   // High CAPE + meaningful precip = likely convective storm
   if (maxCape >= 1000 && precip > 0) return 95;
+
+  // Fallback to minutely_15 weather code if current weather code indicates no rain but minutely predicts precipitation
+  if (code <= 3 && m15PrecipCode !== null) {
+    code = m15PrecipCode;
+  }
+  // Fallback to hourly weather code if current weather code indicates no rain but hourly predicts precipitation
+  if (code <= 3 && hourlyCode !== null && hourlyCode >= 51) {
+    code = hourlyCode;
+  }
 
   // --- Priority 2: Precipitation intensity mapping ---
   if (precip > 0 && code <= 3) {
@@ -790,6 +814,19 @@ function renderCurrent(data, name) {
   const code = deriveCurrentCode(data);
 
   let [icon, desc] = weatherInfo(code);
+
+  // NWS Ground-Station Observation overrides
+  const temp = latestNWSObservation?.temperature != null ? latestNWSObservation.temperature : c.temperature_2m;
+  const humidity = latestNWSObservation?.humidity != null ? latestNWSObservation.humidity : c.relative_humidity_2m;
+  const dewPoint = latestNWSObservation?.dewPoint != null ? latestNWSObservation.dewPoint : c.dew_point_2m;
+  const windSpeed = latestNWSObservation?.windSpeed != null ? latestNWSObservation.windSpeed : c.wind_speed_10m;
+  const gusts = latestNWSObservation?.windGust != null ? latestNWSObservation.windGust : c.wind_gusts_10m;
+  const windDir = latestNWSObservation?.windDirection != null ? latestNWSObservation.windDirection : c.wind_direction_10m;
+  const precip = latestNWSObservation?.precipitation != null ? latestNWSObservation.precipitation : (c.precipitation ?? 0);
+
+  if (latestNWSObservation && latestNWSObservation.textDescription) {
+    desc = latestNWSObservation.textDescription;
+  }
 
   // Override weather icon and description only if AQI is very elevated (visible haze)
   // and there is no active severe weather/precipitation warning or watch.
@@ -838,25 +875,24 @@ function renderCurrent(data, name) {
   }
   $('currentDate').textContent = dateDisplay;
   $('weatherIcon').textContent = icon;
-  $('currentTemp').textContent = `${Math.round(c.temperature_2m)}${unitLabel()}`;
+  $('currentTemp').textContent = `${Math.round(temp)}${unitLabel()}`;
   $('weatherDesc').textContent = desc;
-  $('dewPoint').textContent = `${Math.round(c.dew_point_2m)}${unitLabel()}`;
-  $('humidity').textContent = `${c.relative_humidity_2m}%`;
-  const windSpeed = Math.round(c.wind_speed_10m);
-  const gusts = c.wind_gusts_10m;
+  $('dewPoint').textContent = `${Math.round(dewPoint)}${unitLabel()}`;
+  $('humidity').textContent = `${humidity}%`;
+  const windSpeedVal = Math.round(windSpeed);
   const gustsSpan = $('windGusts');
-  if (gusts != null && gusts > windSpeed) {
-    $('windSpeed').textContent = `${windSpeed} ${windLabel()}`;
+  if (gusts != null && gusts > windSpeedVal) {
+    $('windSpeed').textContent = `${windSpeedVal} ${windLabel()}`;
     gustsSpan.textContent = `Gusts: ${Math.round(gusts)} ${windLabel()}`;
     gustsSpan.style.display = 'block';
   } else {
-    $('windSpeed').textContent = `${windSpeed} ${windLabel()}`;
+    $('windSpeed').textContent = `${windSpeedVal} ${windLabel()}`;
     gustsSpan.style.display = 'none';
   }
-  $('windDir').innerHTML = `${windDirection(c.wind_direction_10m)}<span class="wind-dir">${String(Math.round(c.wind_direction_10m)).padStart(3, '0')}°</span>`;
+  $('windDir').innerHTML = `${windDirection(windDir)}<span class="wind-dir">${String(Math.round(windDir)).padStart(3, '0')}°</span>`;
 
   // Pressure with 3-hour trend
-  let currentPressure = c.pressure_msl;
+  let currentPressure = latestNWSObservation?.pressure != null ? latestNWSObservation.pressure : c.pressure_msl;
   let pressureUnitLabel = 'hPa';
   if (settings.pressureUnit === 'inHg') {
     currentPressure = (currentPressure * 0.02953).toFixed(2);
@@ -883,6 +919,7 @@ function renderCurrent(data, name) {
     // Show AQI tile only when there's an active air quality alert OR WAQI >= 100
     const hasAqAlert = latestAlerts && latestAlerts.some(a => /air quality/i.test(a.event));
     if (aqiVal >= 100 || hasAqAlert) {
+      latestAlerts && latestAlerts.some(a => /air quality/i.test(a.event));
       aqiTile.classList.remove('hidden');
     } else {
       aqiTile.classList.add('hidden');
@@ -894,9 +931,8 @@ function renderCurrent(data, name) {
   }
 
   // Precip Rate
-  const precip = c.precipitation ?? 0;
   const precipUnitLabel = settings.precipUnit === 'inch' ? 'in/hr' : 'mm/hr';
-  $('precipRate').textContent = precip > 0 ? `${precip} ${precipUnitLabel}` : 'None';
+  $('precipRate').textContent = precip > 0 ? `${precip.toFixed(2)} ${precipUnitLabel}` : 'None';
 
   // CAPE (from nearest minutely_15 or hourly)
   const now2 = new Date();
@@ -958,7 +994,10 @@ async function fetchNWSAlerts(lat, lon) {
   try {
     const res = await fetch(
       `https://api.weather.gov/alerts/active?point=${lat},${lon}&status=actual`,
-      { headers: { 'User-Agent': '(weather-pwa, contact@example.com)' } }
+      { 
+        headers: { 'User-Agent': '(weather-pwa, contact@example.com)' },
+        cache: 'no-cache'
+      }
     );
     if (!res.ok) {
       // Non-US location or API issue — just hide the alert
@@ -1033,6 +1072,146 @@ function renderNWSAlert(features) {
 
   if (latestWeatherData && currentLocation) {
     renderCurrent(latestWeatherData, currentLocation.name);
+  }
+}
+
+// ── NWS Ground-Station Observations (US only) ──
+function mapNWSTextToWmoCode(text) {
+  if (!text) return null;
+  const t = text.toLowerCase();
+  
+  if (t.includes('thunderstorm') || t.includes('tornado') || t.includes('squall')) return 95;
+  if (t.includes('heavy rain') || t.includes('heavy shower')) return 65;
+  if (t.includes('moderate rain') || t.includes('rain shower') || t.includes('showers') || t.includes('rain')) {
+    if (t.includes('light')) return 61;
+    if (t.includes('heavy')) return 65;
+    return 63;
+  }
+  if (t.includes('drizzle') || t.includes('mist')) return 51;
+  if (t.includes('heavy snow') || t.includes('blizzard')) return 75;
+  if (t.includes('snow') || t.includes('ice') || t.includes('hail') || t.includes('sleet')) {
+    if (t.includes('light')) return 71;
+    return 73;
+  }
+  if (t.includes('fog') || t.includes('haze') || t.includes('smoke')) return 45;
+  if (t.includes('overcast') || t.includes('cloudy')) {
+    if (t.includes('partly')) return 2;
+    if (t.includes('mostly')) return 3;
+    return 3;
+  }
+  if (t.includes('fair') || t.includes('clear') || t.includes('sunny')) return 0;
+  
+  return null;
+}
+
+function parseNWSValue(property, targetUnit) {
+  if (!property || property.value == null) return null;
+  const val = property.value;
+  const unit = property.unitCode || '';
+  
+  if (targetUnit === 'temp') {
+    if (unit.includes('degC')) {
+      return settings.unit === 'fahrenheit' ? (val * 9/5) + 32 : val;
+    }
+    if (unit.includes('degF')) {
+      return settings.unit === 'celsius' ? (val - 32) * 5/9 : val;
+    }
+    return val;
+  }
+  
+  if (targetUnit === 'wind') {
+    let speedMs = val;
+    if (unit.includes('km_h')) {
+      speedMs = val / 3.6;
+    } else if (unit.includes('kn')) {
+      speedMs = val * 0.514444;
+    } else if (unit.includes('mile_h')) {
+      speedMs = val * 0.44704;
+    }
+    
+    if (settings.windUnit === 'mph') return speedMs * 2.23694;
+    if (settings.windUnit === 'kmh') return speedMs * 3.6;
+    if (settings.windUnit === 'kn') return speedMs * 1.94384;
+    return speedMs;
+  }
+
+  if (targetUnit === 'pressure') {
+    if (unit.includes('Pa')) {
+      return val / 100; // Convert Pa to hPa
+    }
+    return val;
+  }
+  
+  return val;
+}
+
+function parseNWSPrecip(property) {
+  if (!property || property.value == null) return null;
+  const val = property.value; // meters
+  const valMm = val * 1000; // meters to mm
+  if (settings.precipUnit === 'inch') {
+    return valMm * 0.0393701; // mm to inches
+  }
+  return valMm;
+}
+
+async function fetchNWSObservation(lat, lon) {
+  try {
+    const latRounded = Math.round(lat * 100) / 100;
+    const lonRounded = Math.round(lon * 100) / 100;
+    const cacheKey = `nws_station_${latRounded}_${lonRounded}`;
+    let stationId = localStorage.getItem(cacheKey);
+
+    if (!stationId) {
+      const pointRes = await fetch(
+        `https://api.weather.gov/points/${lat},${lon}`,
+        { headers: { 'User-Agent': '(weather-pwa, contact@example.com)' } }
+      );
+      if (!pointRes.ok) return;
+      const pointJson = await pointRes.json();
+      const stationsUrl = pointJson.properties?.observationStations;
+      if (!stationsUrl) return;
+
+      const stationsRes = await fetch(stationsUrl, { headers: { 'User-Agent': '(weather-pwa, contact@example.com)' } });
+      if (!stationsRes.ok) return;
+      const stationsJson = await stationsRes.json();
+      const firstStation = stationsJson.features?.[0];
+      stationId = firstStation?.properties?.stationIdentifier;
+      if (!stationId) return;
+
+      localStorage.setItem(cacheKey, stationId);
+    }
+
+    const obsRes = await fetch(
+      `https://api.weather.gov/stations/${stationId}/observations/latest`,
+      { 
+        headers: { 'User-Agent': '(weather-pwa, contact@example.com)' },
+        cache: 'no-cache'
+      }
+    );
+    if (!obsRes.ok) return;
+    const obsJson = await obsRes.json();
+    const p = obsJson.properties;
+    if (!p) return;
+
+    latestNWSObservation = {
+      temperature: parseNWSValue(p.temperature, 'temp'),
+      humidity: p.relativeHumidity?.value,
+      windSpeed: parseNWSValue(p.windSpeed, 'wind'),
+      windGust: parseNWSValue(p.windGust, 'wind'),
+      windDirection: p.windDirection?.value,
+      textDescription: p.textDescription,
+      weatherCode: mapNWSTextToWmoCode(p.textDescription),
+      dewPoint: parseNWSValue(p.dewPoint, 'temp'),
+      precipitation: parseNWSPrecip(p.precipitationLastHour),
+      pressure: parseNWSValue(p.barometricPressure, 'pressure')
+    };
+
+    if (latestWeatherData && currentLocation) {
+      renderCurrent(latestWeatherData, currentLocation.name);
+    }
+  } catch (err) {
+    console.warn('NWS Observations fetch failed:', err);
   }
 }
 
