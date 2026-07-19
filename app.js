@@ -1407,6 +1407,9 @@ function renderDayHourly(container, data, dayStr) {
   const scroll = document.createElement('div');
   scroll.className = 'hourly-scroll';
 
+  const waqiCurrent = data.aqi?.current?.us_aqi;
+  const showHourlyAqi = waqiCurrent >= 100;
+
   for (let idx = 0; idx < times.length; idx++) {
     if (times[idx] < dayStart || times[idx] > dayEnd) continue;
     const dt = new Date(times[idx]);
@@ -1414,10 +1417,10 @@ function renderDayHourly(container, data, dayStr) {
     const cape = data.hourly.cape?.[idx] ?? 0;
     const code = data.hourly.weather_code[idx];
 
-    // Find matching AQI hourly data
+    // Find matching AQI hourly data (gated by WAQI current reading)
     let hourlyAqi = null;
     let hourlyPm25 = null;
-    if (data.aqi && data.aqi.hourly) {
+    if (showHourlyAqi && data.aqi && data.aqi.hourly) {
       const timeStr = times[idx];
       const aqiIdx = data.aqi.hourly.time.indexOf(timeStr);
       if (aqiIdx !== -1) {
