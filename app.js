@@ -1517,6 +1517,13 @@ function showRefreshIndicator(show) {
 
 // ── Service Worker Registration ──
 if ('serviceWorker' in navigator) {
+  let refreshing = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!refreshing) {
+      refreshing = true;
+      window.location.reload();
+    }
+  });
   navigator.serviceWorker.register('sw.js');
 }
 
