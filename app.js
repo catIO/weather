@@ -622,11 +622,8 @@ async function fetchWeather(lat, lon, name, { silent = false, force = false } = 
       data.aqi = aqiData;
     }
 
-    // Gating check: only fetch proxy if Open-Meteo data is missing or indicates elevated levels
-    const currentAqi = aqiData?.current?.us_aqi ?? 0;
-    const currentPm25 = aqiData?.current?.pm2_5 ?? 0;
-
-    if (!aqiData || currentAqi >= 80 || currentPm25 >= 25) {
+    // Always fetch proxy if available to prioritize accurate ground station readings
+    if (true) {
       try {
         const proxyRes = await fetch(proxyAqiUrl);
         if (proxyRes.ok) {
@@ -1613,26 +1610,24 @@ function generateActivityOutlook(data) {
   let startIdx = times.findIndex((t) => new Date(t) >= now);
   if (startIdx < 0) startIdx = 0;
 
-  const hoursToLook = 10;
+  const hoursToLook = 6;
   const indices = [];
   for (let i = 0; i < hoursToLook && (startIdx + i) < times.length; i++) {
     indices.push(startIdx + i);
   }
 
-  // Check hourly AQI values in the forecast window (next 10 hours)
-  let maxAqiInWindow = 0;
-  if (data.aqi && data.aqi.hourly) {
-    indices.forEach(idx => {
-      const timeStr = times[idx];
-      const aqiIdx = data.aqi.hourly.time.indexOf(timeStr);
-      if (aqiIdx !== -1) {
-        const aqiVal = data.aqi.hourly.us_aqi[aqiIdx];
-        if (aqiVal != null && aqiVal > maxAqiInWindow) {
-          maxAqiInWindow = aqiVal;
-        }
-      }
-    });
-  }
+  const windowStart = now;
+  const windowEnd = new Date(now.getTime() + hoursToLook * 60 * 60 * 1000);
+
+  // Filter latestAlerts to only those overlapping with the forecast window
+  const activeAlertsInWindow = (latestAlerts || []).filter(alert => {
+    const onsetTime = alert.onset ? new Date(alert.onset) : (alert.effective ? new Date(alert.effective) : now);
+    const endTime = alert.ends ? new Date(alert.ends) : (alert.expires ? new Date(alert.expires) : new Date(now.getTime() + 24 * 60 * 60 * 1000));
+    return onsetTime < windowEnd && endTime > windowStart;
+  });
+
+  // For the outlook, only use current AQI reading, not simulated hourly forecasts
+  const maxAqiInWindow = data.aqi?.current?.us_aqi ?? 0;
 
   let maxWind = 0;
   let maxGusts = 0;
@@ -1781,8 +1776,8 @@ function generateActivityOutlook(data) {
   </div>`;
 
   // 2b. Active Weather Alerts (NWS)
-  if (latestAlerts && latestAlerts.length > 0) {
-    const alertsList = latestAlerts.map(alert => {
+  if (activeAlertsInWindow && activeAlertsInWindow.length > 0) {
+    const alertsList = activeAlertsInWindow.map(alert => {
       let color = "var(--storm)";
       let border = "var(--storm-border)";
       let bg = "var(--storm-bg)";
@@ -1860,7 +1855,7 @@ function generateActivityOutlook(data) {
   // 3. Wind & Activity Recommendation
   let windText = "";
   let windThreshold = settings.windUnit === 'kmh' ? 24 : (settings.windUnit === 'ms' ? 6 : 15);
-  let gustThreshold = settings.windUnit === 'kmh' ? 32 : (settings.windUnit === 'ms' ? 9 : 20);
+  let gustThreshold = settings.windUnit === 'kmh' ? 40 : (settings.windUnit === 'ms' ? 11 : 25);
   let calmCeiling = settings.windUnit === 'kmh' ? 11 : (settings.windUnit === 'ms' ? 3 : 7);
 
   if (maxGusts > gustThreshold) {
@@ -1928,32 +1923,58 @@ function generateActivityOutlook(data) {
     reasons.push(`unhealthy air quality (AQI ${maxAqiInWindow})`);
   } else if (maxAqiInWindow >= 100) {
     reasons.push(`poor air quality (AQI ${maxAqiInWindow})`);
+  } else if (maxAqiInWindow > 50) {
+    reasons.push(`moderate air quality (AQI ${maxAqiInWindow})`);
   }
 
   let alertDangerous = false;
   let alertPoor = false;
   let alertFair = false;
 
-  if (latestAlerts && latestAlerts.length > 0) {
-    latestAlerts.forEach(alert => {
+  if (activeAlertsInWindow && activeAlertsInWindow.length > 0) {
+    activeAlertsInWindow.forEach(alert => {
       const eventLower = alert.event.toLowerCase();
       const severity = alert.severity;
+      const isWatch = eventLower.includes("watch");
 
-      if (severity === "Extreme" || severity === "Severe") {
-        alertDangerous = true;
-        reasons.push(`active ${alert.event}`);
-      } else if (severity === "Moderate" || eventLower.includes("air quality")) {
-        alertPoor = true;
-        reasons.push(`active ${alert.event}`);
+      if (isWatch) {
+        // A Watch indicates that a hazard is possible but not imminent/active.
+        // Check if there is actual matching weather in the forecast window.
+        let hasHazardInForecast = false;
+        if (eventLower.includes("wind") || eventLower.includes("gale")) {
+          hasHazardInForecast = maxGusts > gustThreshold;
+        } else if (eventLower.includes("winter") || eventLower.includes("snow") || eventLower.includes("blizzard") || eventLower.includes("freeze") || eventLower.includes("cold")) {
+          hasHazardInForecast = willSnow || willIce || minTemp <= coldThreshold;
+        } else {
+          // Default to precipitation/storms (e.g., flood, thunderstorm, tornado watches)
+          hasHazardInForecast = willRain || willStorm;
+        }
+
+        if (hasHazardInForecast) {
+          alertPoor = true;
+          reasons.push(`active ${alert.event}`);
+        } else {
+          // If the forecast is clear, the watch does not affect the rating category,
+          // but we still record it so it can be listed if other conditions trigger a non-Great rating.
+          reasons.push(`active ${alert.event}`);
+        }
       } else {
-        alertFair = true;
-        reasons.push(`active ${alert.event}`);
+        if (severity === "Extreme" || severity === "Severe") {
+          alertDangerous = true;
+          reasons.push(`active ${alert.event}`);
+        } else if (severity === "Moderate" || eventLower.includes("air quality")) {
+          alertPoor = true;
+          reasons.push(`active ${alert.event}`);
+        } else {
+          alertFair = true;
+          reasons.push(`active ${alert.event}`);
+        }
       }
     });
   }
 
   const isDangerous = precipSeverity === "severe" || maxTemp >= hotThreshold || minTemp <= deepFreezeThreshold || alertDangerous || maxAqiInWindow >= 200;
-  const isPoor = precipSeverity === "warning" || maxGusts > gustThreshold || alertPoor || maxAqiInWindow >= 100;
+  const isPoor = precipSeverity === "warning" || maxGusts > gustThreshold || alertPoor || maxAqiInWindow > 100;
   const isFair = precipSeverity === "watch" || maxWind > windThreshold || maxTemp >= warmThreshold || minTemp <= coldThreshold || alertFair || maxAqiInWindow > 50;
 
   if (isDangerous) {
