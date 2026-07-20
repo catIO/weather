@@ -1052,3 +1052,55 @@ header {
     width: 100%;
   }
 }
+
+/* ── PWA Update Toast Banner ── */
+.update-banner {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  background-color: var(--card-bg, #1a1a1a);
+  color: var(--text, #ffffff);
+  padding: 12px 18px;
+  border-radius: 12px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  z-index: 2000;
+  border: 1px solid var(--border, #2a2a2a);
+  animation: slideUp 0.3s ease-out;
+  max-width: calc(100vw - 32px);
+  width: max-content;
+}
+
+.update-message {
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.update-btn {
+  background-color: var(--accent, #0076ff);
+  color: white;
+  border: none;
+  padding: 6px 16px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-weight: 600;
+  transition: opacity 0.2s;
+}
+
+.update-btn:hover {
+  opacity: 0.9;
+}
+
+@keyframes slideUp {
+  from {
+    transform: translate(-50%, 20px);
+    opacity: 0;
+  }
+  to {
+    transform: translate(-50%, 0);
+    opacity: 1;
+  }
+}

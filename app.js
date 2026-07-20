@@ -284,6 +284,27 @@ function showToast(message) {
   setTimeout(() => toast.classList.remove('show'), 2000);
 }
 
+function showUpdateBanner(worker) {
+  let banner = document.getElementById('update-banner');
+  if (!banner) {
+    banner = document.createElement('div');
+    banner.id = 'update-banner';
+    banner.className = 'update-banner';
+    banner.innerHTML = `
+      <span class="update-message">A new version of Oikaze is available.</span>
+      <button id="update-btn" class="update-btn">Update</button>
+    `;
+    document.body.appendChild(banner);
+  }
+
+  const updateBtn = banner.querySelector('#update-btn');
+  updateBtn.addEventListener('click', () => {
+    worker.postMessage({ type: 'SKIP_WAITING' });
+    banner.remove();
+  });
+}
+
+
 // ── Share button ──
 shareBtn.addEventListener('click', () => {
   const url = window.location.href;
@@ -1521,7 +1542,22 @@ if ('serviceWorker' in navigator) {
       window.location.reload();
     }
   });
-  navigator.serviceWorker.register('sw.js');
+
+  navigator.serviceWorker.register('sw.js').then((registration) => {
+    if (registration.waiting) {
+      showUpdateBanner(registration.waiting);
+      return;
+    }
+
+    registration.addEventListener('updatefound', () => {
+      const newWorker = registration.installing;
+      newWorker.addEventListener('statechange', () => {
+        if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+          showUpdateBanner(newWorker);
+        }
+      });
+    });
+  });
 }
 
 // ── Refresh on focus (if data is stale) ──
