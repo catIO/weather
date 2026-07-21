@@ -695,8 +695,8 @@ function deriveCurrentCode(data) {
       const headline = alert.headline || '';
       const desc = alert.description || '';
       const textToSearch = `${event} ${headline} ${desc}`;
-      return /thunderstorm|storm|flood|tornado|hurricane|tropical|gale|marine|rain|precipitation|shower|winter|snow|blizzard/i.test(textToSearch) 
-             && !/air quality|heat/i.test(textToSearch);
+      return /thunderstorm|storm|flood|tornado|hurricane|tropical|gale|marine|rain|precipitation|shower|winter|snow|blizzard/i.test(textToSearch)
+        && !/air quality|heat/i.test(textToSearch);
     });
 
     if (activeAlert) {
@@ -836,8 +836,8 @@ function renderCurrent(data, name) {
     const aqiVal = data.aqi.current.us_aqi;
     const hasRainOrStormAlert = latestAlerts && latestAlerts.some(alert => {
       const event = alert.event || '';
-      return /thunderstorm|storm|flood|tornado|hurricane|tropical|gale|marine|rain|precipitation|shower/i.test(event) 
-             && !/air quality|heat/i.test(event);
+      return /thunderstorm|storm|flood|tornado|hurricane|tropical|gale|marine|rain|precipitation|shower/i.test(event)
+        && !/air quality|heat/i.test(event);
     });
     if (aqiVal >= 150 && [0, 1, 2, 3, 45, 48].includes(code) && !hasRainOrStormAlert) {
       icon = '😶‍🌫️';
@@ -1002,7 +1002,7 @@ async function fetchNWSAlerts(lat, lon) {
   try {
     const res = await fetch(
       `https://api.weather.gov/alerts/active?point=${lat},${lon}&status=actual`,
-      { 
+      {
         headers: { 'User-Agent': '(weather-pwa, contact@example.com)' },
         cache: 'no-cache'
       }
@@ -1087,7 +1087,7 @@ function renderNWSAlert(features) {
 function mapNWSTextToWmoCode(text) {
   if (!text) return null;
   const t = text.toLowerCase();
-  
+
   if (t.includes('thunderstorm') || t.includes('tornado') || t.includes('squall')) return 95;
   if (t.includes('heavy rain') || t.includes('heavy shower')) return 65;
   if (t.includes('moderate rain') || t.includes('rain shower') || t.includes('showers') || t.includes('rain')) {
@@ -1108,7 +1108,7 @@ function mapNWSTextToWmoCode(text) {
     return 3;
   }
   if (t.includes('fair') || t.includes('clear') || t.includes('sunny')) return 0;
-  
+
   return null;
 }
 
@@ -1116,17 +1116,17 @@ function parseNWSValue(property, targetUnit) {
   if (!property || property.value == null) return null;
   const val = property.value;
   const unit = property.unitCode || '';
-  
+
   if (targetUnit === 'temp') {
     if (unit.includes('degC')) {
-      return settings.unit === 'fahrenheit' ? (val * 9/5) + 32 : val;
+      return settings.unit === 'fahrenheit' ? (val * 9 / 5) + 32 : val;
     }
     if (unit.includes('degF')) {
-      return settings.unit === 'celsius' ? (val - 32) * 5/9 : val;
+      return settings.unit === 'celsius' ? (val - 32) * 5 / 9 : val;
     }
     return val;
   }
-  
+
   if (targetUnit === 'wind') {
     // NWS unitCode comes as e.g. "wmoUnit:m_s-1", "wmoUnit:km_h-1", "wmoUnit:knot"
     let speedMs = val; // assume m/s as default
@@ -1151,7 +1151,7 @@ function parseNWSValue(property, targetUnit) {
     }
     return val;
   }
-  
+
   return val;
 }
 
@@ -1185,8 +1185,30 @@ async function fetchNWSObservation(lat, lon) {
       const stationsRes = await fetch(stationsUrl, { headers: { 'User-Agent': '(weather-pwa, contact@example.com)' } });
       if (!stationsRes.ok) return;
       const stationsJson = await stationsRes.json();
-      const firstStation = stationsJson.features?.[0];
-      stationId = firstStation?.properties?.stationIdentifier;
+
+      // Pick the geographically closest station to the user's coordinates.
+      // The NWS list order is NOT guaranteed to be distance-sorted — e.g. for
+      // Fort Lee, NJ the list starts with KEWR (Newark, ~15 mi away) even
+      // though KNYC (Central Park) and KTEB (Teterboro) are ~5 mi away.
+      const features = stationsJson.features ?? [];
+      let bestStation = null;
+      let bestDist = Infinity;
+      for (const f of features) {
+        const coords = f.geometry?.coordinates; // [lon, lat]
+        if (!coords) continue;
+        const dLat = (coords[1] - lat) * Math.PI / 180;
+        const dLon = (coords[0] - lon) * Math.PI / 180;
+        const a = Math.sin(dLat / 2) ** 2 +
+          Math.cos(lat * Math.PI / 180) * Math.cos(coords[1] * Math.PI / 180) *
+          Math.sin(dLon / 2) ** 2;
+        const dist = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)); // radians
+        if (dist < bestDist) {
+          bestDist = dist;
+          bestStation = f;
+        }
+      }
+      if (!bestStation) bestStation = features[0]; // fallback
+      stationId = bestStation?.properties?.stationIdentifier;
       if (!stationId) return;
 
       localStorage.setItem(cacheKey, stationId);
@@ -1194,7 +1216,7 @@ async function fetchNWSObservation(lat, lon) {
 
     const obsRes = await fetch(
       `https://api.weather.gov/stations/${stationId}/observations/latest`,
-      { 
+      {
         headers: { 'User-Agent': '(weather-pwa, contact@example.com)' },
         cache: 'no-cache'
       }
