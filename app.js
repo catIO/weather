@@ -214,13 +214,14 @@ function getDefaultsForCountry(countryCode) {
   return { unit: 'celsius', windUnit: 'kmh', precipUnit: 'mm', pressureUnit: 'hPa', distanceUnit: 'km' };
 }
 
-async function detectCountryDefaults() {
+function detectCountryDefaults() {
   // Only run on first use (no saved settings exist)
   if (localStorage.getItem('weather_settings')) return;
   try {
-    const res = await fetch('https://ipapi.co/country/', { signal: AbortSignal.timeout(3000) });
-    if (!res.ok) return;
-    const country = (await res.text()).trim().toUpperCase();
+    // Derive country from locale (no network call needed)
+    const locale = Intl.DateTimeFormat().resolvedOptions().locale || navigator.language || '';
+    const parts = locale.split('-');
+    const country = (parts[parts.length - 1] || '').toUpperCase();
     if (country.length === 2) {
       const defaults = getDefaultsForCountry(country);
       Object.assign(settings, defaults);
@@ -234,7 +235,7 @@ async function detectCountryDefaults() {
         if (el) el.value = settings[key];
       });
     }
-  } catch { /* Network error — keep hardcoded defaults */ }
+  } catch { /* Intl not available — keep hardcoded defaults */ }
 }
 
 function loadSettings() {
@@ -567,6 +568,8 @@ async function fetchWeather(lat, lon, name, { silent = false, force = false } = 
   currentLocation = { lat, lon, name };
   latestAlerts = [];
   latestNWSObservation = null;
+  stormAlertEl.classList.add('hidden');
+  stormAlertEl.classList.remove('storm-severe');
   lastFetchTime = Date.now();
   localStorage.setItem('weather_last_fetch_time', String(lastFetchTime));
   localStorage.setItem('weather_last_location', JSON.stringify(currentLocation));
@@ -585,7 +588,7 @@ async function fetchWeather(lat, lon, name, { silent = false, force = false } = 
       latitude: lat,
       longitude: lon,
       current: 'temperature_2m,relative_humidity_2m,weather_code,wind_speed_10m,wind_direction_10m,dew_point_2m,uv_index,pressure_msl,wind_gusts_10m,precipitation',
-      hourly: 'temperature_2m,weather_code,wind_speed_10m,wind_direction_10m,precipitation_probability,pressure_msl,wind_gusts_10m,cape',
+      hourly: 'temperature_2m,weather_code,wind_speed_10m,wind_direction_10m,precipitation_probability,precipitation,pressure_msl,wind_gusts_10m,cape',
       minutely_15: 'lightning_potential,cape,weather_code',
       daily: 'weather_code,temperature_2m_max,temperature_2m_min,wind_speed_10m_max,wind_direction_10m_dominant,precipitation_probability_max',
       temperature_unit: tempUnit,
@@ -595,62 +598,18 @@ async function fetchWeather(lat, lon, name, { silent = false, force = false } = 
       timezone: 'auto',
     });
 
+    // Use GFS Seamless for US locations (blends 3km HRRR for short-term
+    // with GFS for extended — better convective/precipitation accuracy)
+    const isUS = lat >= 24 && lat <= 50 && lon >= -125 && lon <= -66;
+    if (isUS) {
+      params.append('models', 'ncep_gfs_seamless');
+    }
+
     const weatherUrl = `https://api.open-meteo.com/v1/forecast?${params}`;
-    const aqiUrl = `https://air-quality-api.open-meteo.com/v1/air-quality?latitude=${lat}&longitude=${lon}&current=us_aqi,pm2_5,pm10&hourly=us_aqi,pm2_5,pm10&forecast_days=7&timezone=auto`;
-    const proxyAqiUrl = `/api/air-quality?lat=${lat}&lon=${lon}`;
 
-    let data, aqiData = null;
-    const [weatherRes, aqiRes] = await Promise.all([
-      fetch(weatherUrl, { cache: 'no-cache' }),
-      fetch(aqiUrl, { cache: 'no-cache' }).catch(err => {
-        console.warn('AQI fetch failed:', err);
-        return null;
-      })
-    ]);
-
+    const weatherRes = await fetch(weatherUrl, { cache: 'no-cache' });
     if (!weatherRes.ok) throw new Error('Weather API error');
-    data = await weatherRes.json();
-
-    if (aqiRes && aqiRes.ok) {
-      try {
-        aqiData = await aqiRes.json();
-      } catch (e) {
-        console.warn('Failed to parse AQI JSON:', e);
-      }
-    }
-
-    if (aqiData) {
-      data.aqi = aqiData;
-    }
-
-    // Always fetch proxy if available to prioritize accurate ground station readings
-    if (true) {
-      try {
-        const proxyRes = await fetch(proxyAqiUrl);
-        if (proxyRes.ok) {
-          const proxyAqiData = await proxyRes.json();
-          if (proxyAqiData && proxyAqiData.status === 'ok' && proxyAqiData.data) {
-            const waqi = proxyAqiData.data;
-            if (data.aqi) {
-              if (!data.aqi.current) data.aqi.current = {};
-              data.aqi.current.us_aqi = waqi.aqi;
-              if (waqi.iaqi?.pm25) {
-                data.aqi.current.pm2_5 = waqi.iaqi.pm25.v;
-              }
-            } else {
-              data.aqi = {
-                current: {
-                  us_aqi: waqi.aqi,
-                  pm2_5: waqi.iaqi?.pm25 ? waqi.iaqi.pm25.v : 0
-                }
-              };
-            }
-          }
-        }
-      } catch (err) {
-        console.warn('Proxy AQI fetch failed (using Open-Meteo fallback):', err);
-      }
-    }
+    const data = await weatherRes.json();
 
     latestWeatherData = data;
 
@@ -661,8 +620,17 @@ async function fetchWeather(lat, lon, name, { silent = false, force = false } = 
     localStorage.setItem('weather_last_fetch_time', String(lastFetchTime));
 
     // Fetch NWS alerts and observations (US only, non-blocking)
-    fetchNWSAlerts(lat, lon);
-    fetchNWSObservation(lat, lon);
+    const isUSLocation = lat >= 24 && lat <= 50 && lon >= -125 && lon <= -66;
+    if (isUSLocation) {
+      fetchNWSAlerts(lat, lon);
+      fetchNWSObservation(lat, lon);
+    } else {
+      // Clear US-only data from previous location
+      latestAlerts = [];
+      latestNWSObservation = null;
+      stormAlertEl.classList.add('hidden');
+      stormAlertEl.classList.remove('storm-severe');
+    }
   } catch (err) {
     console.error(err);
     if (!hasData) {
@@ -773,12 +741,14 @@ function deriveCurrentCode(data) {
   // High CAPE + meaningful precip = likely convective storm
   if (maxCape >= 1000 && precip > 0) return 95;
 
-  // Fallback to minutely_15 weather code if current weather code indicates no rain but minutely predicts precipitation
-  if (code <= 3 && m15PrecipCode !== null) {
+  // Upgrade to precipitation only when actual precip is measured OR a majority
+  // of the minutely_15 window agrees (a single 15-min slot prediction is too noisy)
+  const m15PrecipCount = m15Window.filter(i => codeM15[i] >= 51).length;
+  if (code <= 3 && m15PrecipCode !== null && (precip > 0 || m15PrecipCount >= 2)) {
     code = m15PrecipCode;
   }
-  // Fallback to hourly weather code if current weather code indicates no rain but hourly predicts precipitation
-  if (code <= 3 && hourlyCode !== null && hourlyCode >= 51) {
+  // Same for hourly: only override if there's measured precip to back it up
+  if (code <= 3 && hourlyCode !== null && hourlyCode >= 51 && precip > 0) {
     code = hourlyCode;
   }
 
@@ -1078,8 +1048,39 @@ function renderNWSAlert(features) {
   stormAlertTitleEl.textContent = top.event;
   stormAlertDetailEl.textContent = top.headline || top.description?.slice(0, 120) || '';
 
+  // If there's an active air quality or smoke alert, fetch WAQI for real station AQI
+  const hasAqAlert = alerts.some(a =>
+    /air quality|smoke|dense smoke/i.test(a.event)
+  );
+  if (hasAqAlert && currentLocation) {
+    fetchWAQI(currentLocation.lat, currentLocation.lon);
+  }
+
   if (latestWeatherData && currentLocation) {
     renderCurrent(latestWeatherData, currentLocation.name);
+  }
+}
+
+// ── WAQI AQI fetch (only called when AQ/smoke alert is active) ──
+async function fetchWAQI(lat, lon) {
+  try {
+    const res = await fetch(`/api/air-quality?lat=${lat}&lon=${lon}`);
+    if (!res.ok) return;
+    const json = await res.json();
+    if (json?.status !== 'ok' || !json.data) return;
+    const waqi = json.data;
+    if (!latestWeatherData) return;
+    latestWeatherData.aqi = {
+      current: {
+        us_aqi: waqi.aqi,
+        pm2_5: waqi.iaqi?.pm25?.v ?? 0,
+      },
+    };
+    if (currentLocation) {
+      renderCurrent(latestWeatherData, currentLocation.name);
+    }
+  } catch (err) {
+    console.warn('WAQI fetch failed:', err);
   }
 }
 
@@ -1169,10 +1170,31 @@ async function fetchNWSObservation(lat, lon) {
   try {
     const latRounded = Math.round(lat * 100) / 100;
     const lonRounded = Math.round(lon * 100) / 100;
-    const cacheKey = `nws_station_${latRounded}_${lonRounded}`;
-    let stationId = localStorage.getItem(cacheKey);
+    const cacheKey = `nws_stations_${latRounded}_${lonRounded}`;
+    const cacheTsKey = `${cacheKey}_ts`;
+    let stationIds = null;
 
-    if (!stationId) {
+    // Try to load cached station list
+    try {
+      stationIds = JSON.parse(localStorage.getItem(cacheKey));
+    } catch { /* ignore */ }
+
+    // Expire cached stations after 30 days
+    const cacheAge = Date.now() - (parseInt(localStorage.getItem(cacheTsKey), 10) || 0);
+    if (stationIds && cacheAge > 30 * 24 * 60 * 60 * 1000) {
+      localStorage.removeItem(cacheKey);
+      localStorage.removeItem(cacheTsKey);
+      stationIds = null;
+    }
+
+    // Also clear legacy single-station cache key
+    const legacyKey = `nws_station_${latRounded}_${lonRounded}`;
+    if (localStorage.getItem(legacyKey)) {
+      localStorage.removeItem(legacyKey);
+      localStorage.removeItem(`${legacyKey}_ts`);
+    }
+
+    if (!stationIds) {
       const pointRes = await fetch(
         `https://api.weather.gov/points/${lat},${lon}`,
         { headers: { 'User-Agent': '(weather-pwa, contact@example.com)' } }
@@ -1186,78 +1208,87 @@ async function fetchNWSObservation(lat, lon) {
       if (!stationsRes.ok) return;
       const stationsJson = await stationsRes.json();
 
-      // Pick the geographically closest station to the user's coordinates.
-      // The NWS list order is NOT guaranteed to be distance-sorted — e.g. for
-      // Fort Lee, NJ the list starts with KEWR (Newark, ~15 mi away) even
-      // though KNYC (Central Park) and KTEB (Teterboro) are ~5 mi away.
+      // Sort stations by distance and keep the 3 closest
       const features = stationsJson.features ?? [];
-      let bestStation = null;
-      let bestDist = Infinity;
-      for (const f of features) {
-        const coords = f.geometry?.coordinates; // [lon, lat]
-        if (!coords) continue;
-        const dLat = (coords[1] - lat) * Math.PI / 180;
-        const dLon = (coords[0] - lon) * Math.PI / 180;
-        const a = Math.sin(dLat / 2) ** 2 +
-          Math.cos(lat * Math.PI / 180) * Math.cos(coords[1] * Math.PI / 180) *
-          Math.sin(dLon / 2) ** 2;
-        const dist = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)); // radians
-        if (dist < bestDist) {
-          bestDist = dist;
-          bestStation = f;
+      const ranked = features
+        .map(f => {
+          const coords = f.geometry?.coordinates; // [lon, lat]
+          if (!coords) return null;
+          const dLat = (coords[1] - lat) * Math.PI / 180;
+          const dLon = (coords[0] - lon) * Math.PI / 180;
+          const a = Math.sin(dLat / 2) ** 2 +
+            Math.cos(lat * Math.PI / 180) * Math.cos(coords[1] * Math.PI / 180) *
+            Math.sin(dLon / 2) ** 2;
+          const dist = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+          return { id: f.properties?.stationIdentifier, dist };
+        })
+        .filter(s => s && s.id)
+        .sort((a, b) => a.dist - b.dist)
+        .slice(0, 3)
+        .map(s => s.id);
+
+      if (ranked.length === 0) return;
+      stationIds = ranked;
+
+      localStorage.setItem(cacheKey, JSON.stringify(stationIds));
+      localStorage.setItem(cacheTsKey, String(Date.now()));
+    }
+
+    // Try each station in order; accept the first with fresh, complete data
+    const NWS_HEADERS = { 'User-Agent': '(weather-pwa, contact@example.com)' };
+    const MAX_AGE_MS = 60 * 60 * 1000; // 60 minutes
+
+    for (const sid of stationIds) {
+      try {
+        const obsRes = await fetch(
+          `https://api.weather.gov/stations/${sid}/observations/latest`,
+          { headers: NWS_HEADERS, cache: 'no-cache' }
+        );
+        if (!obsRes.ok) continue;
+        const obsJson = await obsRes.json();
+        const p = obsJson.properties;
+        if (!p) continue;
+
+        // Reject stale observations
+        const obsTimestamp = p.timestamp ? new Date(p.timestamp) : null;
+        const obsAgeMs = obsTimestamp ? Date.now() - obsTimestamp.getTime() : 0;
+        if (obsAgeMs > MAX_AGE_MS) continue;
+
+        // Reject incomplete observations (missing wind direction means partial report)
+        const hasWindDir = p.windDirection?.value != null;
+        const isCalm = p.windSpeed?.value === 0;
+        if (!hasWindDir && !isCalm) continue;
+
+        const nwsWindSpeed = parseNWSValue(p.windSpeed, 'wind');
+        const nwsWindDir = (nwsWindSpeed === 0 || p.windDirection?.value == null)
+          ? null
+          : p.windDirection.value;
+
+        latestNWSObservation = {
+          temperature: parseNWSValue(p.temperature, 'temp'),
+          humidity: p.relativeHumidity?.value,
+          windSpeed: nwsWindSpeed,
+          windGust: parseNWSValue(p.windGust, 'wind'),
+          windDirection: nwsWindDir,
+          calm: nwsWindSpeed === 0,
+          textDescription: p.textDescription,
+          weatherCode: mapNWSTextToWmoCode(p.textDescription),
+          dewPoint: parseNWSValue(p.dewPoint, 'temp'),
+          precipitation: parseNWSPrecip(p.precipitationLastHour),
+          pressure: parseNWSValue(p.barometricPressure, 'pressure')
+        };
+
+        if (latestWeatherData && currentLocation) {
+          renderCurrent(latestWeatherData, currentLocation.name);
         }
+        return; // Found a good station, done
+      } catch {
+        continue; // Try next station
       }
-      if (!bestStation) bestStation = features[0]; // fallback
-      stationId = bestStation?.properties?.stationIdentifier;
-      if (!stationId) return;
-
-      localStorage.setItem(cacheKey, stationId);
     }
 
-    const obsRes = await fetch(
-      `https://api.weather.gov/stations/${stationId}/observations/latest`,
-      {
-        headers: { 'User-Agent': '(weather-pwa, contact@example.com)' },
-        cache: 'no-cache'
-      }
-    );
-    if (!obsRes.ok) return;
-    const obsJson = await obsRes.json();
-    const p = obsJson.properties;
-    if (!p) return;
-
-    // Reject stale observations (> 90 minutes old)
-    const obsTimestamp = p.timestamp ? new Date(p.timestamp) : null;
-    const obsAgeMs = obsTimestamp ? Date.now() - obsTimestamp.getTime() : 0;
-    if (obsAgeMs > 90 * 60 * 1000) {
-      console.warn(`NWS observation is stale (${Math.round(obsAgeMs / 60000)} min old), ignoring`);
-      return;
-    }
-
-    const nwsWindSpeed = parseNWSValue(p.windSpeed, 'wind');
-    // NWS reports windDirection as null when calm — keep null so renderCurrent
-    // knows to show "Calm" rather than mixing NWS speed=0 with Open-Meteo direction
-    const nwsWindDir = (nwsWindSpeed === 0 || p.windDirection?.value == null)
-      ? null
-      : p.windDirection.value;
-
-    latestNWSObservation = {
-      temperature: parseNWSValue(p.temperature, 'temp'),
-      humidity: p.relativeHumidity?.value,
-      windSpeed: nwsWindSpeed,
-      windGust: parseNWSValue(p.windGust, 'wind'),
-      windDirection: nwsWindDir,
-      calm: nwsWindSpeed === 0,
-      textDescription: p.textDescription,
-      weatherCode: mapNWSTextToWmoCode(p.textDescription),
-      dewPoint: parseNWSValue(p.dewPoint, 'temp'),
-      precipitation: parseNWSPrecip(p.precipitationLastHour),
-      pressure: parseNWSValue(p.barometricPressure, 'pressure')
-    };
-
-    if (latestWeatherData && currentLocation) {
-      renderCurrent(latestWeatherData, currentLocation.name);
-    }
+    // All stations were stale or incomplete — no NWS override
+    console.warn('No NWS station returned a complete, fresh observation');
   } catch (err) {
     console.warn('NWS Observations fetch failed:', err);
   }
