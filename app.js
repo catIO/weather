@@ -613,17 +613,16 @@ async function fetchWeather(lat, lon, name, { silent = false, force = false } = 
 
     latestWeatherData = data;
 
-    renderCurrent(data, name);
-    renderHourly(data);
-    renderDaily(data);
-    lastFetchTime = Date.now();
-    localStorage.setItem('weather_last_fetch_time', String(lastFetchTime));
-
-    // Fetch NWS alerts and observations (US only, non-blocking)
+    // Fetch NWS alerts and observations (US only)
     const isUSLocation = lat >= 24 && lat <= 50 && lon >= -125 && lon <= -66;
     if (isUSLocation) {
-      fetchNWSAlerts(lat, lon);
-      fetchNWSObservation(lat, lon);
+      // Await observation before first render to avoid icon/description flash;
+      // timeout after 3s so we don't block indefinitely
+      await Promise.race([
+        fetchNWSObservation(lat, lon),
+        new Promise(r => setTimeout(r, 3000))
+      ]);
+      fetchNWSAlerts(lat, lon); // alerts banner can load async
     } else {
       // Clear US-only data from previous location
       latestAlerts = [];
@@ -631,6 +630,12 @@ async function fetchWeather(lat, lon, name, { silent = false, force = false } = 
       stormAlertEl.classList.add('hidden');
       stormAlertEl.classList.remove('storm-severe');
     }
+
+    renderCurrent(data, name);
+    renderHourly(data);
+    renderDaily(data);
+    lastFetchTime = Date.now();
+    localStorage.setItem('weather_last_fetch_time', String(lastFetchTime));
   } catch (err) {
     console.error(err);
     if (!hasData) {
@@ -685,10 +690,9 @@ function deriveCurrentCode(data) {
     }
   }
 
-  // --- Priority 0.5: NWS Ground-Station Observation override ───
-  if (latestNWSObservation && latestNWSObservation.weatherCode !== null) {
-    return latestNWSObservation.weatherCode;
-  }
+  // --- Priority 0.5: NWS observation no longer overrides weather code.
+  // Open-Meteo model + minutely_15 is more accurate for precipitation/conditions
+  // at the exact coordinates (NWS stations are distant and miss local precip).
 
   const c = data.current;
   let code = c.weather_code;
@@ -741,14 +745,12 @@ function deriveCurrentCode(data) {
   // High CAPE + meaningful precip = likely convective storm
   if (maxCape >= 1000 && precip > 0) return 95;
 
-  // Upgrade to precipitation only when actual precip is measured OR a majority
-  // of the minutely_15 window agrees (a single 15-min slot prediction is too noisy)
-  const m15PrecipCount = m15Window.filter(i => codeM15[i] >= 51).length;
-  if (code <= 3 && m15PrecipCode !== null && (precip > 0 || m15PrecipCount >= 2)) {
+  // Upgrade to precipitation from minutely_15 if it predicts precip in current window
+  if (code <= 3 && m15PrecipCode !== null) {
     code = m15PrecipCode;
   }
-  // Same for hourly: only override if there's measured precip to back it up
-  if (code <= 3 && hourlyCode !== null && hourlyCode >= 51 && precip > 0) {
+  // Fallback to hourly weather code if current weather code indicates no rain but hourly predicts precipitation
+  if (code <= 3 && hourlyCode !== null && hourlyCode >= 51) {
     code = hourlyCode;
   }
 
@@ -783,22 +785,20 @@ function renderCurrent(data, name) {
 
   let [icon, desc] = weatherInfo(code);
 
-  // NWS Ground-Station Observation overrides
+  // NWS Ground-Station Observation overrides (temp, humidity, dew point, pressure only)
+  // Wind and description come from Open-Meteo model (more accurate at exact coordinates)
   const obs = latestNWSObservation;
   const temp = obs?.temperature != null ? obs.temperature : c.temperature_2m;
   const humidity = obs?.humidity != null ? obs.humidity : c.relative_humidity_2m;
   const dewPoint = obs?.dewPoint != null ? obs.dewPoint : c.dew_point_2m;
-  // Use NWS wind speed when available; null means "not observed", 0 means calm
-  const windSpeed = obs?.windSpeed != null ? obs.windSpeed : c.wind_speed_10m;
-  const gusts = obs?.windGust != null ? obs.windGust : c.wind_gusts_10m;
-  // Only use NWS direction when wind is not calm (avoid mixing NWS 0 speed + Open-Meteo direction)
-  const isCalm = obs?.calm === true || windSpeed === 0;
-  const windDir = (!isCalm && obs?.windDirection != null) ? obs.windDirection : c.wind_direction_10m;
-  const precip = obs?.precipitation != null ? obs.precipitation : (c.precipitation ?? 0);
+  // Wind always from Open-Meteo (NWS stations have frequent nulls and terrain bias)
+  const windSpeed = c.wind_speed_10m;
+  const gusts = c.wind_gusts_10m;
+  const isCalm = windSpeed === 0;
+  const windDir = c.wind_direction_10m;
+  const precip = c.precipitation ?? 0;
 
-  if (latestNWSObservation && latestNWSObservation.textDescription) {
-    desc = latestNWSObservation.textDescription;
-  }
+  // Description comes from deriveCurrentCode (Open-Meteo model), not NWS text
 
   // Override weather icon and description only if AQI is very elevated (visible haze)
   // and there is no active severe weather/precipitation warning or watch.
