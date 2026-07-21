@@ -284,26 +284,6 @@ function showToast(message) {
   setTimeout(() => toast.classList.remove('show'), 2000);
 }
 
-function showUpdateBanner(worker) {
-  let banner = document.getElementById('update-banner');
-  if (!banner) {
-    banner = document.createElement('div');
-    banner.id = 'update-banner';
-    banner.className = 'update-banner';
-    banner.innerHTML = `
-      <span class="update-message">A new version of Oikaze is available.</span>
-      <button id="update-btn" class="update-btn">Update</button>
-    `;
-    document.body.appendChild(banner);
-  }
-
-  const updateBtn = banner.querySelector('#update-btn');
-  updateBtn.addEventListener('click', () => {
-    worker.postMessage({ type: 'SKIP_WAITING' });
-    banner.remove();
-  });
-}
-
 
 // ── Share button ──
 shareBtn.addEventListener('click', () => {
@@ -834,13 +814,17 @@ function renderCurrent(data, name) {
   let [icon, desc] = weatherInfo(code);
 
   // NWS Ground-Station Observation overrides
-  const temp = latestNWSObservation?.temperature != null ? latestNWSObservation.temperature : c.temperature_2m;
-  const humidity = latestNWSObservation?.humidity != null ? latestNWSObservation.humidity : c.relative_humidity_2m;
-  const dewPoint = latestNWSObservation?.dewPoint != null ? latestNWSObservation.dewPoint : c.dew_point_2m;
-  const windSpeed = latestNWSObservation?.windSpeed != null ? latestNWSObservation.windSpeed : c.wind_speed_10m;
-  const gusts = latestNWSObservation?.windGust != null ? latestNWSObservation.windGust : c.wind_gusts_10m;
-  const windDir = latestNWSObservation?.windDirection != null ? latestNWSObservation.windDirection : c.wind_direction_10m;
-  const precip = latestNWSObservation?.precipitation != null ? latestNWSObservation.precipitation : (c.precipitation ?? 0);
+  const obs = latestNWSObservation;
+  const temp = obs?.temperature != null ? obs.temperature : c.temperature_2m;
+  const humidity = obs?.humidity != null ? obs.humidity : c.relative_humidity_2m;
+  const dewPoint = obs?.dewPoint != null ? obs.dewPoint : c.dew_point_2m;
+  // Use NWS wind speed when available; null means "not observed", 0 means calm
+  const windSpeed = obs?.windSpeed != null ? obs.windSpeed : c.wind_speed_10m;
+  const gusts = obs?.windGust != null ? obs.windGust : c.wind_gusts_10m;
+  // Only use NWS direction when wind is not calm (avoid mixing NWS 0 speed + Open-Meteo direction)
+  const isCalm = obs?.calm === true || windSpeed === 0;
+  const windDir = (!isCalm && obs?.windDirection != null) ? obs.windDirection : c.wind_direction_10m;
+  const precip = obs?.precipitation != null ? obs.precipitation : (c.precipitation ?? 0);
 
   if (latestNWSObservation && latestNWSObservation.textDescription) {
     desc = latestNWSObservation.textDescription;
@@ -899,15 +883,21 @@ function renderCurrent(data, name) {
   $('humidity').textContent = `${Math.round(humidity)}%`;
   const windSpeedVal = Math.round(windSpeed);
   const gustsSpan = $('windGusts');
-  if (gusts != null && gusts > windSpeedVal) {
+  const windDirEl = $('windDir');
+  if (isCalm) {
+    $('windSpeed').textContent = 'Calm';
+    gustsSpan.style.display = 'none';
+    windDirEl.innerHTML = '';
+  } else if (gusts != null && gusts > windSpeedVal) {
     $('windSpeed').textContent = `${windSpeedVal} ${windLabel()}`;
     gustsSpan.textContent = `Gusts: ${Math.round(gusts)} ${windLabel()}`;
     gustsSpan.style.display = 'block';
+    windDirEl.innerHTML = `${windDirection(windDir)}<span class="wind-dir">${String(Math.round(windDir)).padStart(3, '0')}°</span>`;
   } else {
     $('windSpeed').textContent = `${windSpeedVal} ${windLabel()}`;
     gustsSpan.style.display = 'none';
+    windDirEl.innerHTML = `${windDirection(windDir)}<span class="wind-dir">${String(Math.round(windDir)).padStart(3, '0')}°</span>`;
   }
-  $('windDir').innerHTML = `${windDirection(windDir)}<span class="wind-dir">${String(Math.round(windDir)).padStart(3, '0')}°</span>`;
 
   // Pressure with 3-hour trend
   let currentPressure = latestNWSObservation?.pressure != null ? latestNWSObservation.pressure : c.pressure_msl;
@@ -1138,15 +1128,17 @@ function parseNWSValue(property, targetUnit) {
   }
   
   if (targetUnit === 'wind') {
-    let speedMs = val;
-    if (unit.includes('km_h')) {
+    // NWS unitCode comes as e.g. "wmoUnit:m_s-1", "wmoUnit:km_h-1", "wmoUnit:knot"
+    let speedMs = val; // assume m/s as default
+    if (unit.includes('km_h') || unit.includes('km/h')) {
       speedMs = val / 3.6;
-    } else if (unit.includes('kn')) {
+    } else if (unit.includes('knot') || unit.includes('kt')) {
       speedMs = val * 0.514444;
-    } else if (unit.includes('mile_h')) {
+    } else if (unit.includes('mile_h') || unit.includes('mi/h') || unit.includes('mph')) {
       speedMs = val * 0.44704;
     }
-    
+    // m_s-1 / m/s: val is already m/s, speedMs stays as val
+
     if (settings.windUnit === 'mph') return speedMs * 2.23694;
     if (settings.windUnit === 'kmh') return speedMs * 3.6;
     if (settings.windUnit === 'kn') return speedMs * 1.94384;
@@ -1212,12 +1204,28 @@ async function fetchNWSObservation(lat, lon) {
     const p = obsJson.properties;
     if (!p) return;
 
+    // Reject stale observations (> 90 minutes old)
+    const obsTimestamp = p.timestamp ? new Date(p.timestamp) : null;
+    const obsAgeMs = obsTimestamp ? Date.now() - obsTimestamp.getTime() : 0;
+    if (obsAgeMs > 90 * 60 * 1000) {
+      console.warn(`NWS observation is stale (${Math.round(obsAgeMs / 60000)} min old), ignoring`);
+      return;
+    }
+
+    const nwsWindSpeed = parseNWSValue(p.windSpeed, 'wind');
+    // NWS reports windDirection as null when calm — keep null so renderCurrent
+    // knows to show "Calm" rather than mixing NWS speed=0 with Open-Meteo direction
+    const nwsWindDir = (nwsWindSpeed === 0 || p.windDirection?.value == null)
+      ? null
+      : p.windDirection.value;
+
     latestNWSObservation = {
       temperature: parseNWSValue(p.temperature, 'temp'),
       humidity: p.relativeHumidity?.value,
-      windSpeed: parseNWSValue(p.windSpeed, 'wind'),
+      windSpeed: nwsWindSpeed,
       windGust: parseNWSValue(p.windGust, 'wind'),
-      windDirection: p.windDirection?.value,
+      windDirection: nwsWindDir,
+      calm: nwsWindSpeed === 0,
       textDescription: p.textDescription,
       weatherCode: mapNWSTextToWmoCode(p.textDescription),
       dewPoint: parseNWSValue(p.dewPoint, 'temp'),
@@ -1536,6 +1544,7 @@ function showRefreshIndicator(show) {
 // ── Service Worker Registration ──
 if ('serviceWorker' in navigator) {
   let refreshing = false;
+  // When a new SW takes control, reload once to serve fresh assets
   navigator.serviceWorker.addEventListener('controllerchange', () => {
     if (!refreshing) {
       refreshing = true;
@@ -1543,21 +1552,7 @@ if ('serviceWorker' in navigator) {
     }
   });
 
-  navigator.serviceWorker.register('sw.js').then((registration) => {
-    if (registration.waiting) {
-      showUpdateBanner(registration.waiting);
-      return;
-    }
-
-    registration.addEventListener('updatefound', () => {
-      const newWorker = registration.installing;
-      newWorker.addEventListener('statechange', () => {
-        if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
-          showUpdateBanner(newWorker);
-        }
-      });
-    });
-  });
+  navigator.serviceWorker.register('sw.js');
 }
 
 // ── Refresh on focus (if data is stale) ──

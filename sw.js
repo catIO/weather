@@ -13,6 +13,7 @@ self.addEventListener('install', (e) => {
   e.waitUntil(
     caches.open(CACHE_NAME).then((cache) => cache.addAll(ASSETS))
   );
+  self.skipWaiting(); // activate immediately, no waiting for old tabs
 });
 
 self.addEventListener('activate', (e) => {
@@ -24,11 +25,8 @@ self.addEventListener('activate', (e) => {
   self.clients.claim();
 });
 
-self.addEventListener('message', (e) => {
-  if (e.data && e.data.type === 'SKIP_WAITING') {
-    self.skipWaiting();
-  }
-});
+// Message handler kept for compatibility, no longer needed
+self.addEventListener('message', () => {});
 
 self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url);
