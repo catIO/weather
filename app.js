@@ -611,7 +611,7 @@ async function fetchWeather(lat, lon, name, { silent = false, force = false } = 
       latitude: lat,
       longitude: lon,
       current: 'temperature_2m,relative_humidity_2m,weather_code,wind_speed_10m,wind_direction_10m,dew_point_2m,uv_index,pressure_msl,wind_gusts_10m,precipitation,cape',
-      hourly: 'temperature_2m,weather_code,wind_speed_10m,wind_direction_10m,precipitation_probability,precipitation,pressure_msl,wind_gusts_10m,cape',
+      hourly: 'temperature_2m,relative_humidity_2m,dew_point_2m,weather_code,wind_speed_10m,wind_direction_10m,precipitation_probability,precipitation,pressure_msl,wind_gusts_10m,cape',
       minutely_15: 'lightning_potential,cape,weather_code',
       daily: 'weather_code,temperature_2m_max,temperature_2m_min,wind_speed_10m_max,wind_direction_10m_dominant,precipitation_probability_max',
       temperature_unit: tempUnit,
@@ -1737,16 +1737,24 @@ function generateActivityOutlook(data) {
   // For the outlook, only use current AQI reading, not simulated hourly forecasts
   const maxAqiInWindow = data.aqi?.current?.us_aqi ?? 0;
 
-  let maxWind = 0;
-  let maxGusts = 0;
+  const currentObsWind = latestNWSObservation?.windSpeed ?? data.current?.wind_speed_10m ?? 0;
+  const currentObsGust = latestNWSObservation?.windGust ?? data.current?.wind_gusts_10m ?? 0;
+  const currentObsTemp = latestNWSObservation?.temperature ?? data.current?.temperature_2m;
+  const currentObsHumidity = latestNWSObservation?.humidity ?? data.current?.relative_humidity_2m ?? 0;
+  const currentObsDewPoint = latestNWSObservation?.dewPoint ?? data.current?.dew_point_2m ?? -1000;
+
+  let maxWind = currentObsWind;
+  let maxGusts = Math.max(currentObsWind, currentObsGust);
+  let maxHumidity = currentObsHumidity;
+  let maxDewPoint = currentObsDewPoint;
   let willRain = false;
   let willSnow = false;
   let willIce = false;
   let willStorm = false;
   let willHail = false;
   let maxCape = 0;
-  let minTemp = 1000;
-  let maxTemp = -1000;
+  let minTemp = currentObsTemp != null ? currentObsTemp : 1000;
+  let maxTemp = currentObsTemp != null ? currentObsTemp : -1000;
   let overcastCount = 0;
   let cloudyCount = 0;
 
@@ -1760,9 +1768,13 @@ function generateActivityOutlook(data) {
     const code = data.hourly.weather_code[idx];
     const temp = data.hourly.temperature_2m[idx];
     const cape = data.hourly.cape?.[idx] ?? 0;
+    const humidity = data.hourly.relative_humidity_2m?.[idx] ?? data.current?.relative_humidity_2m ?? 0;
+    const dewPoint = data.hourly.dew_point_2m?.[idx] ?? data.current?.dew_point_2m ?? -1000;
 
     if (wind > maxWind) maxWind = wind;
     if (gusts > maxGusts) maxGusts = gusts;
+    if (humidity > maxHumidity) maxHumidity = humidity;
+    if (dewPoint > maxDewPoint) maxDewPoint = dewPoint;
     if (temp < minTemp) minTemp = temp;
     if (code === 3) overcastCount++;
     else if (code === 2) cloudyCount++;
@@ -1798,10 +1810,14 @@ function generateActivityOutlook(data) {
 
   // 1. Temperature range & Extreme temperatures
   const isFahrenheit = settings.unit === 'fahrenheit';
-  const hotThreshold = isFahrenheit ? 95 : 35;
-  const warmThreshold = isFahrenheit ? 85 : 30;
+  const hotThreshold = isFahrenheit ? 95 : 35; // Extreme heat
+  const humidHeatTempThreshold = isFahrenheit ? 85 : 29.5; // Warm temp threshold requiring high humidity to impact outlook
+  const humidHeatHumidityThreshold = 65; // Relative humidity threshold (%)
+  const humidHeatDewPointThreshold = isFahrenheit ? 68 : 20; // Dew point threshold
   const coldThreshold = isFahrenheit ? 32 : 0;
   const deepFreezeThreshold = isFahrenheit ? 15 : -10;
+
+  const isHumidHeat = maxTemp >= humidHeatTempThreshold && (maxHumidity >= humidHeatHumidityThreshold || maxDewPoint >= humidHeatDewPointThreshold);
 
   let tempStatus = `Lows of <strong>${Math.round(minTemp)}${tLabel}</strong> and highs of <strong>${Math.round(maxTemp)}${tLabel}</strong>.`;
   let tempAlert = "";
@@ -1853,7 +1869,7 @@ function generateActivityOutlook(data) {
     precipSeverity = "warning";
     precipText = `<strong style="color: var(--storm);">High Instability:</strong> The atmosphere is highly unstable (CAPE: ${Math.round(maxCape)} J/kg). While dry now, any storm cells that form are expected to escalate rapidly.`;
   } else {
-    precipText = `No significant rain, snow, or storm activity is expected.`;
+    precipText = `No significant weather hazards expected.`;
   }
 
   let precipBg = "transparent";
@@ -1962,16 +1978,25 @@ function generateActivityOutlook(data) {
 
   // 3. Wind & Activity Recommendation
   let windText = "";
-  let windThreshold = settings.windUnit === 'kmh' ? 24 : (settings.windUnit === 'ms' ? 6 : 15);
-  let gustThreshold = settings.windUnit === 'kmh' ? 40 : (settings.windUnit === 'ms' ? 11 : 25);
-  let calmCeiling = settings.windUnit === 'kmh' ? 11 : (settings.windUnit === 'ms' ? 3 : 7);
+  const isKmh = settings.windUnit === 'kmh';
+  const isMs = settings.windUnit === 'ms';
+  const isKnots = settings.windUnit === 'knots' || settings.windUnit === 'kn';
 
-  if (maxGusts > gustThreshold) {
-    windText = `Wind gusts up to <strong>${Math.round(maxGusts)} ${wLabel}</strong> from the <strong>${peakWindDirStr}</strong>.`;
-  } else if (maxWind > windThreshold) {
-    windText = `Sustained winds up to <strong>${Math.round(maxWind)} ${wLabel}</strong> from the <strong>${peakWindDirStr}</strong>.`;
-  } else if (maxGusts > calmCeiling) {
-    windText = `Light winds with gusts to <strong>${Math.round(maxGusts)} ${wLabel}</strong> (${peakWindDirStr}).`;
+  const strongGustThreshold = isKmh ? 45 : (isMs ? 12.5 : (isKnots ? 24 : 28));
+  const strongSustainedThreshold = isKmh ? 32 : (isMs ? 9 : (isKnots ? 17 : 20));
+  const moderateGustThreshold = isKmh ? 29 : (isMs ? 8 : (isKnots ? 15 : 18));
+  const moderateSustainedThreshold = isKmh ? 19 : (isMs ? 5.5 : (isKnots ? 10 : 12));
+  const calmCeiling = isKmh ? 11 : (isMs ? 3 : (isKnots ? 6 : 7));
+
+  const isStrongWind = maxGusts >= strongGustThreshold || maxWind >= strongSustainedThreshold;
+  const isModerateWind = maxGusts >= moderateGustThreshold || maxWind >= moderateSustainedThreshold;
+
+  if (isStrongWind) {
+    windText = `Strong winds with gusts up to <strong>${Math.round(maxGusts)} ${wLabel}</strong> from the <strong>${peakWindDirStr}</strong>.`;
+  } else if (isModerateWind) {
+    windText = `Moderate winds with gusts to <strong>${Math.round(maxGusts)} ${wLabel}</strong> (${peakWindDirStr}).`;
+  } else if (maxGusts > calmCeiling || maxWind > calmCeiling) {
+    windText = `Light breeze with gusts to <strong>${Math.round(maxGusts)} ${wLabel}</strong> (${peakWindDirStr}).`;
   } else {
     windText = `Calm winds at <strong>${Math.round(maxWind)} ${wLabel}</strong> (${peakWindDirStr}).`;
   }
@@ -1985,10 +2010,11 @@ function generateActivityOutlook(data) {
   else skyDesc = 'clear skies';
   // Derive wind description from actual speeds
   let windDesc;
-  if (maxGusts > gustThreshold) windDesc = 'gusty winds';
-  else if (maxWind > windThreshold) windDesc = 'breezy conditions';
-  else if (maxGusts > calmCeiling) windDesc = 'light winds';
+  if (isStrongWind) windDesc = 'gusty winds';
+  else if (isModerateWind) windDesc = 'moderate winds';
+  else if (maxGusts > calmCeiling || maxWind > calmCeiling) windDesc = 'light breeze';
   else windDesc = 'calm winds';
+
   let reason = `${windDesc.charAt(0).toUpperCase() + windDesc.slice(1)}, pleasant temperatures, and ${skyDesc}.`;
   let ratingColor = "#66bb6a"; // Green
 
@@ -2009,8 +2035,8 @@ function generateActivityOutlook(data) {
 
   if (maxTemp >= hotThreshold) {
     reasons.push("dangerous extreme heat");
-  } else if (maxTemp >= warmThreshold) {
-    reasons.push("warm temperatures");
+  } else if (isHumidHeat) {
+    reasons.push("high heat and humidity");
   }
 
   if (minTemp <= deepFreezeThreshold) {
@@ -2019,10 +2045,10 @@ function generateActivityOutlook(data) {
     reasons.push("freezing temperatures");
   }
 
-  if (maxGusts > gustThreshold) {
+  if (isStrongWind) {
     reasons.push("gusty winds");
-  } else if (maxWind > windThreshold) {
-    reasons.push("breezy winds");
+  } else if (isModerateWind) {
+    reasons.push("moderate wind gusts");
   }
 
   if (maxAqiInWindow >= 200) {
@@ -2050,7 +2076,7 @@ function generateActivityOutlook(data) {
         // Check if there is actual matching weather in the forecast window.
         let hasHazardInForecast = false;
         if (eventLower.includes("wind") || eventLower.includes("gale")) {
-          hasHazardInForecast = maxGusts > gustThreshold;
+          hasHazardInForecast = isStrongWind || isModerateWind;
         } else if (eventLower.includes("winter") || eventLower.includes("snow") || eventLower.includes("blizzard") || eventLower.includes("freeze") || eventLower.includes("cold")) {
           hasHazardInForecast = willSnow || willIce || minTemp <= coldThreshold;
         } else {
@@ -2082,8 +2108,8 @@ function generateActivityOutlook(data) {
   }
 
   const isDangerous = precipSeverity === "severe" || maxTemp >= hotThreshold || minTemp <= deepFreezeThreshold || alertDangerous || maxAqiInWindow >= 200;
-  const isPoor = precipSeverity === "warning" || maxGusts > gustThreshold || alertPoor || maxAqiInWindow > 100;
-  const isFair = precipSeverity === "watch" || maxWind > windThreshold || maxTemp >= warmThreshold || minTemp <= coldThreshold || alertFair || maxAqiInWindow > 50;
+  const isPoor = precipSeverity === "warning" || isStrongWind || alertPoor || maxAqiInWindow > 100;
+  const isFair = precipSeverity === "watch" || isModerateWind || isHumidHeat || minTemp <= coldThreshold || alertFair || maxAqiInWindow > 50;
 
   if (isDangerous) {
     rating = "Dangerous";
