@@ -43,7 +43,7 @@ A minimal weather PWA built with vanilla JavaScript. No frameworks, no build ste
 
 ## Data
 
-Weather data is provided by [Open-Meteo](https://open-meteo.com/) (free, no API key required). Uses current, hourly, daily, and minutely_15 endpoints.
+Weather data is provided by [Open-Meteo](https://open-meteo.com/) (free, no API key required) and live US [NWS Observations](https://api.weather.gov/). For a complete mapping of detail tiles, hourly sources, and update lifecycles, see [docs/data-sources-and-update-flow.md](docs/data-sources-and-update-flow.md).
 
 Air Quality data defaults to the Open-Meteo Air Quality API (using CAMS forecasts) for client-side queries. For highly accurate live station measurements, the app is integrated with a **Netlify Serverless Function** that queries the **WAQI (World Air Quality Index)** API. To enable this, add your free WAQI API token as the `WAQI_TOKEN` environment variable in your Netlify settings. The app will automatically request live station data via this proxy with a seamless client-side fallback if unavailable.
 
