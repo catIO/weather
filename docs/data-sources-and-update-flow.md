@@ -15,7 +15,7 @@ In [`app.js`](../app.js) (`renderCurrent`), metric tiles prioritize **NWS Ground
 | **Wind Speed & Gusts** | NWS Observation (`windSpeed`, `windGust`) | Open-Meteo `data.current.wind_speed_10m`, `wind_gusts_10m` | Sustained 10m wind speed & peak 3s gust speed |
 | **Wind Direction** | NWS Observation (`windDirection` when not calm) | Open-Meteo `data.current.wind_direction_10m` | Direction wind originates from (deg/cardinal) |
 | **Precip Rate** | NWS Observation (`precipitationLastHour`) | Open-Meteo `data.current.precipitation` | Current precipitation rate (`in/hr` or `mm/hr`) |
-| **CAPE** | Open-Meteo `minutely_15.cape` (current slot) | Open-Meteo `hourly.cape` (current hour) | Convective Available Potential Energy ($J/kg$) |
+| **CAPE** | Open-Meteo `data.current.cape` | Open-Meteo `minutely_15.cape` / `hourly.cape` | Convective Available Potential Energy ($J/kg$) |
 | **Pressure** | NWS Observation (`barometricPressure`) | Open-Meteo `data.current.pressure_msl` | Sea-level pressure (`inHg` or `hPa`) |
 | **Pressure Trend** | Derived calculation | Open-Meteo `data.hourly.pressure_msl` | Compares current pressure against 3 hours prior |
 | **UV Index** | Open-Meteo `data.current.uv_index` | N/A | Erythemal UV index |
@@ -38,7 +38,7 @@ In [`app.js`](../app.js) (`renderHourly`):
 
 1. **Open-Meteo Forecast API**
    - **URL**: `https://api.open-meteo.com/v1/forecast`
-   - **Parameters**: `latitude`, `longitude`, `current` (`temperature_2m,relative_humidity_2m,weather_code,wind_speed_10m,wind_direction_10m,dew_point_2m,uv_index,pressure_msl,wind_gusts_10m,precipitation`), `hourly` (`temperature_2m,weather_code,wind_speed_10m,wind_direction_10m,precipitation_probability,pressure_msl,wind_gusts_10m,cape`), `minutely_15` (`lightning_potential,cape,weather_code`), `daily` (`weather_code,temperature_2m_max,temperature_2m_min,wind_speed_10m_max,wind_direction_10m_dominant,precipitation_probability_max`), `temperature_unit`, `wind_speed_unit`, `precipitation_unit`, `forecast_days=10`, `timezone=auto`
+   - **Parameters**: `latitude`, `longitude`, `current` (`temperature_2m,relative_humidity_2m,weather_code,wind_speed_10m,wind_direction_10m,dew_point_2m,uv_index,pressure_msl,wind_gusts_10m,precipitation,cape`), `hourly` (`temperature_2m,weather_code,wind_speed_10m,wind_direction_10m,precipitation_probability,pressure_msl,wind_gusts_10m,cape`), `minutely_15` (`lightning_potential,cape,weather_code`), `daily` (`weather_code,temperature_2m_max,temperature_2m_min,wind_speed_10m_max,wind_direction_10m_dominant,precipitation_probability_max`), `temperature_unit`, `wind_speed_unit`, `precipitation_unit`, `forecast_days=10`, `timezone=auto`
    - **Usage**: Primary numerical weather prediction model data for current conditions, minutely_15 storm windowing, hourly forecast, and 10-day daily forecast.
 
 2. **Open-Meteo Air Quality API**

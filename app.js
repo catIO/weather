@@ -34,6 +34,29 @@ function weatherInfo(code) {
   return WMO_CODES[code] || ['❓', 'Unknown'];
 }
 
+/**
+ * Parses Open-Meteo local ISO timestamps ("2026-07-23T07:00") into true UTC Date objects.
+ * Open-Meteo returns timestamps formatted in location local time without an offset suffix.
+ */
+function parseOpenMeteoTime(timeStr, utcOffsetSeconds = 0) {
+  if (!timeStr) return new Date();
+  const utcDate = new Date(timeStr.endsWith('Z') ? timeStr : timeStr + 'Z');
+  return new Date(utcDate.getTime() - utcOffsetSeconds * 1000);
+}
+
+/**
+ * Finds the array index for the active hour/slot matching `now` in Open-Meteo time arrays.
+ */
+function findCurrentTimeIndex(times = [], utcOffsetSeconds = 0, now = new Date()) {
+  if (!times || !times.length) return 0;
+  let idx = times.findIndex((t) => parseOpenMeteoTime(t, utcOffsetSeconds) > now) - 1;
+  if (idx < 0) {
+    const firstTime = parseOpenMeteoTime(times[0], utcOffsetSeconds);
+    idx = now < firstTime ? 0 : times.length - 1;
+  }
+  return idx;
+}
+
 function getHourlyIcon(code, precipProb, cape) {
   if ([95, 96, 99].includes(code)) {
     return '⛈️';
@@ -150,14 +173,14 @@ function windDirection(degrees) {
 }
 
 function pressureTrend(data) {
-  const times = data.hourly.time;
-  const pressures = data.hourly.pressure_msl;
+  const times = data.hourly?.time ?? [];
+  const pressures = data.hourly?.pressure_msl ?? [];
+  if (!times.length || !pressures.length) return 'Steady';
+  const offset = data.utc_offset_seconds ?? 0;
   const now = new Date();
-  let nowIdx = times.findIndex((t) => new Date(t) >= now);
-  if (nowIdx < 0) nowIdx = times.length - 1;
+  let nowIdx = findCurrentTimeIndex(times, offset, now);
   const threeHoursAgo = new Date(now.getTime() - 3 * 60 * 60 * 1000);
-  let pastIdx = times.findIndex((t) => new Date(t) >= threeHoursAgo);
-  if (pastIdx < 0) pastIdx = 0;
+  let pastIdx = findCurrentTimeIndex(times, offset, threeHoursAgo);
   const diff = pressures[nowIdx] - pressures[pastIdx];
   if (diff > 2) return 'Rising fast';
   if (diff > 0.5) return 'Rising';
@@ -587,7 +610,7 @@ async function fetchWeather(lat, lon, name, { silent = false, force = false } = 
     const params = new URLSearchParams({
       latitude: lat,
       longitude: lon,
-      current: 'temperature_2m,relative_humidity_2m,weather_code,wind_speed_10m,wind_direction_10m,dew_point_2m,uv_index,pressure_msl,wind_gusts_10m,precipitation',
+      current: 'temperature_2m,relative_humidity_2m,weather_code,wind_speed_10m,wind_direction_10m,dew_point_2m,uv_index,pressure_msl,wind_gusts_10m,precipitation,cape',
       hourly: 'temperature_2m,weather_code,wind_speed_10m,wind_direction_10m,precipitation_probability,precipitation,pressure_msl,wind_gusts_10m,cape',
       minutely_15: 'lightning_potential,cape,weather_code',
       daily: 'weather_code,temperature_2m_max,temperature_2m_min,wind_speed_10m_max,wind_direction_10m_dominant,precipitation_probability_max',
@@ -700,13 +723,13 @@ function deriveCurrentCode(data) {
 
   // Check minutely_15 for thunderstorm codes in the current window (±15 min)
   const now = new Date();
+  const offset = data.utc_offset_seconds ?? 0;
   const m15Times = data.minutely_15?.time ?? [];
   const codeM15 = data.minutely_15?.weather_code ?? [];
   const lpiArr = data.minutely_15?.lightning_potential ?? [];
   const capeM15 = data.minutely_15?.cape ?? [];
 
-  let m15Idx = m15Times.findIndex((t) => new Date(t) >= now);
-  if (m15Idx < 0) m15Idx = Math.max(0, m15Times.length - 1);
+  let m15Idx = findCurrentTimeIndex(m15Times, offset, now);
   // Look at current slot and the one before (covers ±15 min window)
   const m15Window = [m15Idx - 1, m15Idx, m15Idx + 1].filter(
     (i) => i >= 0 && i < m15Times.length
@@ -731,8 +754,7 @@ function deriveCurrentCode(data) {
   const hourTimes = data.hourly?.time ?? [];
   const capeHourly = data.hourly?.cape ?? [];
   const codeHourly = data.hourly?.weather_code ?? [];
-  let hIdx = hourTimes.findIndex((t) => new Date(t) >= now);
-  if (hIdx < 0) hIdx = Math.max(0, hourTimes.length - 1);
+  let hIdx = findCurrentTimeIndex(hourTimes, offset, now);
   const hourlyCape = capeHourly[hIdx] ?? 0;
   const hourlyCode = codeHourly[hIdx] ?? null;
   const maxCape = Math.max(nearCape, hourlyCape);
@@ -912,19 +934,21 @@ function renderCurrent(data, name) {
   const precipUnitLabel = settings.precipUnit === 'inch' ? 'in/hr' : 'mm/hr';
   $('precipRate').textContent = precip > 0 ? `${precip.toFixed(2)} ${precipUnitLabel}` : 'None';
 
-  // CAPE (from nearest minutely_15 or hourly)
-  const now2 = new Date();
-  const m15T = data.minutely_15?.time ?? [];
-  const m15C = data.minutely_15?.cape ?? [];
-  let capeIdx = m15T.findIndex((t) => new Date(t) >= now2);
-  if (capeIdx < 0) capeIdx = Math.max(0, m15T.length - 1);
-  let capeVal = m15C[capeIdx] ?? null;
+  // CAPE (from current, or nearest minutely_15 or hourly)
+  let capeVal = data.current?.cape ?? null;
   if (capeVal == null) {
-    const hT = data.hourly?.time ?? [];
-    const hC = data.hourly?.cape ?? [];
-    let hIdx = hT.findIndex((t) => new Date(t) >= now2);
-    if (hIdx < 0) hIdx = Math.max(0, hT.length - 1);
-    capeVal = hC[hIdx] ?? 0;
+    const offset = data.utc_offset_seconds ?? 0;
+    const now2 = new Date();
+    const m15T = data.minutely_15?.time ?? [];
+    const m15C = data.minutely_15?.cape ?? [];
+    let capeIdx = findCurrentTimeIndex(m15T, offset, now2);
+    capeVal = m15C[capeIdx] ?? null;
+    if (capeVal == null) {
+      const hT = data.hourly?.time ?? [];
+      const hC = data.hourly?.cape ?? [];
+      let hIdx = findCurrentTimeIndex(hT, offset, now2);
+      capeVal = hC[hIdx] ?? 0;
+    }
   }
   $('cape').textContent = `${Math.round(capeVal)} J/kg`;
 
@@ -1299,10 +1323,10 @@ function renderHourly(data) {
   const fragment = document.createDocumentFragment();
 
   const now = new Date();
+  const offset = data.utc_offset_seconds ?? 0;
   const times = data.hourly.time;
   // Find the index of the current hour
-  let startIdx = times.findIndex((t) => new Date(t) >= now);
-  if (startIdx < 0) startIdx = 0;
+  let startIdx = findCurrentTimeIndex(times, offset, now);
 
   // Only show hourly AQI when WAQI current reading is severe (>= 100)
   const waqiCurrent = data.aqi?.current?.us_aqi;
@@ -1690,9 +1714,9 @@ window.addEventListener('hashchange', () => {
 // ── Activity Outlook ──
 function generateActivityOutlook(data) {
   const now = new Date();
+  const offset = data.utc_offset_seconds ?? 0;
   const times = data.hourly.time;
-  let startIdx = times.findIndex((t) => new Date(t) >= now);
-  if (startIdx < 0) startIdx = 0;
+  let startIdx = findCurrentTimeIndex(times, offset, now);
 
   const hoursToLook = 6;
   const indices = [];
