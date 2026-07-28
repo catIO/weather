@@ -22,9 +22,10 @@ const WMO_CODES = {
   77: ['🌨️', 'Snow grains'],
   80: ['🌦️', 'Slight rain showers'],
   81: ['🌧️', 'Moderate rain showers'],
-  82: ['🌧️', 'Violent rain showers'],
+  82: ['🌧️', 'Heavy rain showers'],
   85: ['🌨️', 'Slight snow showers'],
   86: ['🌨️', 'Heavy snow showers'],
+  94: ['🌩️', 'Thunderstorm in vicinity'],
   95: ['⛈️', 'Thunderstorm'],
   96: ['⛈️', 'Thunderstorm with slight hail'],
   99: ['⛈️', 'Thunderstorm with heavy hail'],
@@ -58,8 +59,8 @@ function findCurrentTimeIndex(times = [], utcOffsetSeconds = 0, now = new Date()
 }
 
 function getHourlyIcon(code, precipProb, cape) {
-  if ([95, 96, 99].includes(code)) {
-    return '⛈️';
+  if ([94, 95, 96, 99].includes(code)) {
+    return weatherInfo(code)[0];
   }
   if (cape >= 500 && precipProb >= 30) {
     return '⛈️';
@@ -117,7 +118,7 @@ function getDailyIcon(data, dayStr) {
 
   for (const hr of daytimeHours) {
     const { code, precip, cape, aqi, pm2_5 } = hr;
-    if ([95, 96, 99].includes(code) || (cape >= 500 && precip >= 40)) {
+    if ([94, 95, 96, 99].includes(code) || (cape >= 500 && precip >= 40)) {
       thunderHours++;
     } else if (code >= 51 && precip >= 30) {
       // Only count as rain if precip probability supports it
@@ -610,7 +611,7 @@ async function fetchWeather(lat, lon, name, { silent = false, force = false } = 
     const params = new URLSearchParams({
       latitude: lat,
       longitude: lon,
-      current: 'temperature_2m,relative_humidity_2m,weather_code,wind_speed_10m,wind_direction_10m,dew_point_2m,uv_index,pressure_msl,wind_gusts_10m,precipitation,cape',
+      current: 'temperature_2m,relative_humidity_2m,weather_code,wind_speed_10m,wind_direction_10m,dew_point_2m,uv_index,pressure_msl,wind_gusts_10m,precipitation,cape,cloud_cover',
       hourly: 'temperature_2m,relative_humidity_2m,dew_point_2m,weather_code,wind_speed_10m,wind_direction_10m,precipitation_probability,precipitation,pressure_msl,wind_gusts_10m,cape',
       minutely_15: 'lightning_potential,cape,weather_code',
       daily: 'weather_code,temperature_2m_max,temperature_2m_min,wind_speed_10m_max,wind_direction_10m_dominant,precipitation_probability_max',
@@ -681,45 +682,27 @@ function windLabel() {
 
 // ── Smart condition derivation using all available signals ──
 function deriveCurrentCode(data) {
-  // --- Priority 0: Active severe alert upgrade ---
-  if (latestAlerts && latestAlerts.length > 0) {
-    const activeAlert = latestAlerts.find(alert => {
-      const event = alert.event || '';
-      // Ignore watches (e.g. Flood Watch) unless they are convective (Tornado Watch, Severe Thunderstorm Watch)
-      if (/watch/i.test(event) && !/tornado|severe thunderstorm/i.test(event)) return false;
-
-      const headline = alert.headline || '';
-      const desc = alert.description || '';
-      const textToSearch = `${event} ${headline} ${desc}`;
-      return /thunderstorm|storm|flood|tornado|hurricane|tropical|gale|marine|rain|precipitation|shower|winter|snow|blizzard/i.test(textToSearch)
-        && !/air quality|heat/i.test(textToSearch);
-    });
-
-    if (activeAlert) {
-      const event = activeAlert.event || '';
-      const headline = activeAlert.headline || '';
-      const desc = activeAlert.description || '';
-      // Classify the current weather using event, headline, and description for active non-watch alerts
-      const classificationText = `${event} ${headline} ${desc}`;
-      if (/thunderstorm|tornado|hurricane|tropical|marine/i.test(classificationText)) {
-        return 95; // Thunderstorm
-      }
-      if (/flood|rain|precipitation|shower/i.test(classificationText)) {
-        return 65; // Heavy rain
-      }
-      if (/winter|snow|blizzard/i.test(classificationText)) {
-        return 75; // Heavy snow
-      }
-    }
-  }
-
-  // --- Priority 0.5: NWS observation no longer overrides weather code.
-  // Open-Meteo model + minutely_15 is more accurate for precipitation/conditions
-  // at the exact coordinates (NWS stations are distant and miss local precip).
-
+  const obs = latestNWSObservation;
   const c = data.current;
   let code = c.weather_code;
   const precip = c.precipitation ?? 0; // mm or inch depending on unit
+
+  // --- Priority 0: Active severe WARNING upgrade ---
+  // Only active severe WARNINGS (e.g. Severe Thunderstorm Warning, Tornado Warning) force condition upgrades.
+  // Watches (e.g. Severe Thunderstorm Watch), advisories, and statements display in the NWS alert banner but do not fake current weather.
+  if (latestAlerts && latestAlerts.length > 0) {
+    const severeWarning = latestAlerts.find(alert => {
+      const event = alert.event || '';
+      return /warning/i.test(event) && !/watch|advisory|outlook|statement/i.test(event);
+    });
+
+    if (severeWarning) {
+      const event = severeWarning.event || '';
+      if (/thunderstorm|tornado|hurricane|tropical|squall/i.test(event)) return 95;
+      if (/flash flood warning|river flood warning/i.test(event)) return 65;
+      if (/blizzard warning|ice storm warning|winter storm warning/i.test(event)) return 75;
+    }
+  }
 
   // Check minutely_15 for thunderstorm codes in the current window (±15 min)
   const now = new Date();
@@ -759,43 +742,59 @@ function deriveCurrentCode(data) {
   const hourlyCode = codeHourly[hIdx] ?? null;
   const maxCape = Math.max(nearCape, hourlyCape);
 
-  // --- Priority 1: Thunderstorm upgrade ---
-  // If minutely_15 reports a storm code right now, trust it
-  if (m15StormCode !== null) return m15StormCode;
-  // If active lightning potential, it's a thunderstorm (even if precip sensor lags)
-  if (nearLPI > 0) return 95;
-  // High CAPE + meaningful precip = likely convective storm
-  if (maxCape >= 1000 && precip > 0) return 95;
-
-  // Upgrade to precipitation from minutely_15 if it predicts precip in current window
-  if (code <= 3 && m15PrecipCode !== null) {
+  // --- Priority 1: Convective / Storm signals ---
+  if (nearLPI > 0.1 || m15StormCode !== null) {
+    code = precip > 0 ? 95 : 94; // Active rain = Thunderstorm; Dry = Thunderstorm in vicinity
+  } else if (maxCape >= 1000 && precip > 0) {
+    code = 95; // High CAPE + active precipitation = likely convective storm
+  } else if (code <= 3 && m15PrecipCode !== null) {
     code = m15PrecipCode;
-  }
-  // Fallback to hourly weather code if current weather code indicates no rain but hourly predicts precipitation
-  if (code <= 3 && hourlyCode !== null && hourlyCode >= 51) {
+  } else if (code <= 3 && hourlyCode !== null && hourlyCode >= 51) {
     code = hourlyCode;
   }
 
   // --- Priority 2: Precipitation intensity mapping ---
   if (precip > 0 && code <= 3) {
-    // Code says clear/cloudy but it's precipitating — use intensity bands
-    // Thresholds differ by unit; Open-Meteo sends mm by default, inch if configured
-    const isInch = settings.precipUnit === 'inch';
-    const heavy = isInch ? 0.3 : 7.6;   // per hour equiv
-    const moderate = isInch ? 0.1 : 2.5;
-    if (precip >= heavy) return 65;       // Heavy rain
-    if (precip >= moderate) return 63;    // Moderate rain
-    return 61;                             // Slight rain
-  }
-
-  // --- Priority 3: Intensity correction when already raining ---
-  // If code already indicates rain but intensity is higher, upgrade
-  if ([61, 80].includes(code) && precip > 0) {
     const isInch = settings.precipUnit === 'inch';
     const heavy = isInch ? 0.3 : 7.6;
     const moderate = isInch ? 0.1 : 2.5;
-    if (precip >= heavy) return 65;
-    if (precip >= moderate) return 63;
+    if (precip >= heavy) code = 65;
+    else if (precip >= moderate) code = 63;
+    else code = 61;
+  } else if ([61, 80].includes(code) && precip > 0) {
+    const isInch = settings.precipUnit === 'inch';
+    const heavy = isInch ? 0.3 : 7.6;
+    const moderate = isInch ? 0.1 : 2.5;
+    if (precip >= heavy) code = 65;
+    else if (precip >= moderate) code = 63;
+  }
+
+  // --- Priority 3: Hybrid observation & model validation ---
+  // Applies to rain (51..67), shower (80..86), and storm (94..99) codes:
+  const isPrecipOrStormCode = (code >= 51 && code <= 67) || (code >= 80 && code <= 86) || (code >= 94 && code <= 99);
+  if (isPrecipOrStormCode && precip === 0) {
+    if (obs && obs.weatherCode === 94) {
+      // Station explicitly reports Thunderstorm in Vicinity
+      code = 94;
+    } else if (obs && obs.weatherCode != null && obs.weatherCode <= 45 && (obs.precipitation === 0 || obs.precipitation == null) && nearLPI <= 0.1) {
+      code = obs.weatherCode;
+    } else if (obs && obs.weatherCode != null && obs.weatherCode >= 51 && obs.weatherCode !== 95) {
+      code = obs.weatherCode;
+    } else if (code >= 95 && nearLPI <= 0.1) {
+      // Dry storm code without active lightning -> Thunderstorm in vicinity
+      code = 94;
+    } else if (!obs && c.cloud_cover != null && nearLPI <= 0.1) {
+      const cloudCover = c.cloud_cover;
+      if (cloudCover > 80) code = 3;       // Overcast
+      else if (cloudCover > 50) code = 2;  // Partly cloudy
+      else if (cloudCover > 20) code = 1;  // Mainly clear
+      else code = 0;                        // Clear
+    }
+  }
+
+  // Active ground observation upgrade: if model says dry (code <= 3) but NWS station observes active rain/snow
+  if (code <= 3 && obs?.weatherCode >= 51) {
+    code = obs.weatherCode;
   }
 
   return code;
@@ -1054,6 +1053,10 @@ function renderNWSAlert(features) {
 
   latestAlerts = alerts;
 
+  if (latestWeatherData && currentLocation) {
+    renderCurrent(latestWeatherData, currentLocation.name);
+  }
+
   if (alerts.length === 0) {
     stormAlertEl.classList.add('hidden');
     stormAlertEl.classList.remove('storm-severe');
@@ -1113,7 +1116,10 @@ function mapNWSTextToWmoCode(text) {
   if (!text) return null;
   const t = text.toLowerCase();
 
-  if (t.includes('thunderstorm') || t.includes('tornado') || t.includes('squall')) return 95;
+  if (t.includes('thunderstorm') || t.includes('tornado') || t.includes('squall')) {
+    if (t.includes('vicinity') || t.includes('vc')) return 94; // Explicit Thunderstorm in vicinity
+    return 95;
+  }
   if (t.includes('heavy rain') || t.includes('heavy shower')) return 65;
   if (t.includes('moderate rain') || t.includes('rain shower') || t.includes('showers') || t.includes('rain')) {
     if (t.includes('light')) return 61;
@@ -1791,8 +1797,8 @@ function generateActivityOutlook(data) {
 
     if (precipProb > 30) {
       if ([71, 73, 75, 77, 85, 86].includes(code)) willSnow = true;
-      else if ([56, 57, 66, 67].includes(code)) willIce = true;
-      else if ([51, 53, 55, 61, 63, 65, 80, 81, 82, 95, 96, 99].includes(code)) willRain = true;
+      else if ([94, 95, 96, 99].includes(code)) willStorm = true;
+      else if ([51, 53, 55, 61, 63, 65, 80, 81, 82, 94, 95, 96, 99].includes(code)) willRain = true;
     }
 
     const freezingTemp = settings.unit === 'fahrenheit' ? 32 : 0;

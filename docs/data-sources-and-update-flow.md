@@ -21,6 +21,15 @@ In [`app.js`](../app.js) (`renderCurrent`), metric tiles prioritize **NWS Ground
 | **UV Index** | Open-Meteo `data.current.uv_index` | N/A | Erythemal UV index |
 | **Air Quality** | WAQI Proxy (`/api/air-quality`) | Open-Meteo Air Quality API (`data.aqi.current.us_aqi`) | Rendered when AQI $\ge 100$ or active AQ alert |
 
+
+### 1.1 Condition Derivation & Hybrid Validation
+
+Condition text and icons are derived in `deriveCurrentCode` using a hybrid model + observation strategy:
+- **Priority 0 (NWS Severe Warning Event Titles)**: Severe warnings/watches matching event titles (e.g. *Severe Thunderstorm Warning*, *Tornado Warning*) force active storm (`95`), heavy rain (`65`), or snow (`75`) codes. Text inside advisory descriptions is ignored to avoid false positives from non-warning statements.
+- **Priority 1 (Convective/Lightning Check)**: Active minutely_15 lightning potential ($LPI > 0.1$) or storm codes with zero precipitation map to **Thunderstorm in vicinity** (`94`, icon `🌩️`). Active precipitation + lightning maps to active **Thunderstorm** (`95`, icon `⛈️`).
+- **Priority 2 (Precipitation Intensity)**: Active precipitation rate sets rain intensity (Slight `61`, Moderate `63`, Heavy `65`).
+- **Priority 3 (Hybrid Validation)**: If NWS station observes *"Thunderstorm in Vicinity"* or model storm code exists without local rain, sets **Thunderstorm in vicinity** (`94`). If ground observation is dry ($\le 45$) and lightning potential is absent ($LPI \le 0.1$), defaults to ground observation or cloud cover (`0..3`).
+
 ---
 
 ## 2. Hourly Forecast Data
