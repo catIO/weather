@@ -771,24 +771,25 @@ function deriveCurrentCode(data) {
 
   // --- Priority 3: Hybrid observation & model validation ---
   // Applies to rain (51..67), shower (80..86), and storm (94..99) codes:
+  // If model derived a rain/shower/storm code, but current precipitation is 0
+  // and no active lightning is present (nearLPI <= 0.1):
+  // Map to grid cloud cover (Overcast/Partly Cloudy) or station fog/vicinity observation,
+  // preventing false-positive rain descriptions while also avoiding distant airport "Fair" overrides when overcast.
   const isPrecipOrStormCode = (code >= 51 && code <= 67) || (code >= 80 && code <= 86) || (code >= 94 && code <= 99);
   if (isPrecipOrStormCode && precip === 0) {
     if (obs && obs.weatherCode === 94) {
-      // Station explicitly reports Thunderstorm in Vicinity
-      code = 94;
-    } else if (obs && obs.weatherCode != null && obs.weatherCode <= 45 && (obs.precipitation === 0 || obs.precipitation == null) && nearLPI <= 0.1) {
-      code = obs.weatherCode;
+      code = 94; // Station specifically reports Thunderstorm in Vicinity
+    } else if (obs && obs.weatherCode === 45) {
+      code = 45; // Station observes Fog
     } else if (obs && obs.weatherCode != null && obs.weatherCode >= 51 && obs.weatherCode !== 95) {
-      code = obs.weatherCode;
-    } else if (code >= 95 && nearLPI <= 0.1) {
-      // Dry storm code without active lightning -> Thunderstorm in vicinity
-      code = 94;
-    } else if (!obs && c.cloud_cover != null && nearLPI <= 0.1) {
-      const cloudCover = c.cloud_cover;
-      if (cloudCover > 80) code = 3;       // Overcast
-      else if (cloudCover > 50) code = 2;  // Partly cloudy
-      else if (cloudCover > 20) code = 1;  // Mainly clear
-      else code = 0;                        // Clear
+      code = obs.weatherCode; // Station observes active rain/snow
+    } else {
+      // Dry period: use grid cloud cover (or model weather_code) to determine sky condition
+      const cloudCover = c.cloud_cover ?? (code === 3 ? 100 : code === 2 ? 60 : code === 1 ? 30 : 0);
+      if (cloudCover >= 75) code = 3;       // Overcast
+      else if (cloudCover >= 40) code = 2;  // Partly cloudy
+      else if (cloudCover >= 15) code = 1;  // Mainly clear
+      else code = 0;                        // Clear sky
     }
   }
 

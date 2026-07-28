@@ -5,16 +5,16 @@ status: completed
 type: feature
 priority: normal
 created_at: 2026-07-28T15:52:00Z
-updated_at: 2026-07-28T16:02:00Z
+updated_at: 2026-07-28T16:25:00Z
 ---
 
 Implement hybrid verification between live NWS ground station observations and Open-Meteo forecast model data to prevent false-positive rain/thunderstorm conditions during dry hours, and add support for "Thunderstorm in vicinity" (WMO code 94).
 
 ## Summary of Changes
 
-- **Hybrid Ground Validation (`app.js`)**:
-  - Refined `deriveCurrentCode` to verify active precipitation (`precip > 0`) or active lightning potential (`nearLPI > 0.1`) before displaying rain (`51..67`), shower (`80..86`), or storm (`94..99`) codes.
-  - Falls back to live NWS ground station observation (e.g. Overcast, Partly Cloudy) or Open-Meteo `cloud_cover` when local precipitation is zero.
+- **Hybrid Ground Validation & Cloud Cover Fallback (`app.js`)**:
+  - Refined `deriveCurrentCode` to map dry periods (`precip === 0`) during model shower/rain codes to actual grid cloud cover (`cloud_cover >= 75% -> Overcast`, `40% -> Partly cloudy`).
+  - Fixed issue where distant airport ASOS stations (e.g. TEB) reporting `"Fair"` (code 0) overrode overcast model cloud cover to display false `☀️ Clear sky`.
 
 - **NWS Alert Filter Fix (`app.js`)**:
   - Restricted Priority 0 alert condition upgrades strictly to active severe **WARNINGS** (e.g. *Severe Thunderstorm Warning*, *Tornado Warning*).
