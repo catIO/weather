@@ -769,25 +769,28 @@ function deriveCurrentCode(data) {
     else if (precip >= moderate) code = 63;
   }
 
-  // --- Priority 3: Dry Sky Condition Validation (NWS Observation + Cloud Cover) ---
+  // --- Priority 3: Dry Sky Condition Validation (Grid Cloud Cover + Station Overrides) ---
   // If no active rain/storm at location (precip === 0 and nearLPI <= 0.1):
-  // Validates sky conditions against ground station observations and grid cloud cover,
-  // preventing false "Clear sky" displays when cloud cover or ground sensors indicate overcast/partly cloudy.
+  // Prioritizes location-specific grid cloud cover percentage when available to determine sky condition (0..3),
+  // preventing distant or out-of-date airport observations from overriding local clear sky conditions,
+  // while retaining station fog (45) and vicinity thunderstorm (94) overrides.
   if (precip === 0 && nearLPI <= 0.1) {
     if (obs && obs.weatherCode === 94) {
       code = 94; // Vicinity thunderstorm
     } else if (obs && obs.weatherCode === 45) {
       code = 45; // Fog
-    } else if (obs && obs.weatherCode != null && obs.weatherCode >= 1 && obs.weatherCode <= 3) {
-      // Trust ground station observed sky cover (Overcast / Partly cloudy / Mainly clear)
-      code = obs.weatherCode;
-    } else {
+    } else if (c.cloud_cover != null) {
       // Use location grid cloud cover percentage
-      const cloudCover = c.cloud_cover ?? (code === 3 ? 100 : code === 2 ? 60 : code === 1 ? 30 : 0);
+      const cloudCover = c.cloud_cover;
       if (cloudCover >= 75) code = 3;       // Overcast
       else if (cloudCover >= 40) code = 2;  // Partly cloudy
       else if (cloudCover >= 15) code = 1;  // Mainly clear
       else code = 0;                        // Clear sky
+    } else if (obs && obs.weatherCode != null && obs.weatherCode >= 0 && obs.weatherCode <= 3) {
+      // Fallback to ground station observed sky cover when grid cloud cover is unavailable
+      code = obs.weatherCode;
+    } else {
+      code = [0, 1, 2, 3].includes(c.weather_code) ? c.weather_code : 0;
     }
   }
 
