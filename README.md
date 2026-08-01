@@ -75,8 +75,18 @@ manifest.json       PWA manifest
 icons/              App icons
 netlify/functions/  Netlify serverless functions (WAQI API proxy)
 .env                Local environment variables (git-ignored)
-docs/               Planning documents
 ```
+
+## UI Layout & Naming Conventions
+
+| UI Area | Standard Name | Codebase Selector | Data Source / API | Description |
+| :--- | :--- | :--- | :--- | :--- |
+| **Main Left Card** | **Current Conditions Card** | `section#current` | Hybrid: NWS Station Telemetry + Open-Meteo | Container for current weather header, hero temperature summary, and metric grid. |
+| **Left Header** | **Location & Timestamp Header** | `.current-header` | Open-Meteo Geocoding API / Geolocation | Displays city name, current date, and time. |
+| **Left Center** | **Hero Weather Summary** | `.current-main` | **Primary (US):** NWS Station Obs & Active Alerts<br>**Fallback:** Open-Meteo `current` & `minutely_15` | Main weather icon, primary temperature reading (`#currentTemp`), and condition description (`#weatherDesc`). |
+| **Left Grid** | **Current Details Grid** | `.current-details` | **Observed:** NWS Station (Dew, Humidity, Wind, Precip, Pressure)<br>**Model:** Open-Meteo (CAPE, UV)<br>**AQI:** WAQI API (Fallback: Open-Meteo AQI) | Metric tiles (`Dew Point`, `Humidity`, `Wind Speed`, `Pressure`, `CAPE`, `UV Index`, `Air Quality`). |
+| **Main Right Card** | **Hourly Forecast Panel** | `section#hourly` | Open-Meteo Forecast API (`data.hourly`) | Container and horizontal scroll list for 24-hour forecasts. |
+| **First Hourly Tile** | **"Now" Hourly Card** | `.hourly-card` (index 0) | Open-Meteo Forecast API (`data.hourly[0]`) | Hourly forecast card representing the current hour model slice (`Now`). |
 
 ## License
 
