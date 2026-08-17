@@ -1,7 +1,7 @@
 {
-  "name": "Oikaze - Weather App",
+  "name": "Oikaze",
   "short_name": "Oikaze",
-  "description": "Current conditions, hourly & 10-day forecast",
+  "description": "Oikaze -Simple Weather App",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#ffa000",
