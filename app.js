@@ -1593,7 +1593,7 @@ function updateFavicon(emoji) {
     ctx.fillText(emoji, 16, 16);
 
     const dataUrl = canvas.toDataURL('image/png');
-    const links = document.querySelectorAll("link[rel*='icon']");
+    const links = document.querySelectorAll("link[rel='icon'], link[rel='shortcut icon']");
     links.forEach(link => {
       link.href = dataUrl;
     });

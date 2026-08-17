@@ -1,4 +1,4 @@
-const CACHE_VERSION = 15; // bump on breaking changes
+const CACHE_VERSION = 16; // bump on breaking changes
 const CACHE_NAME = `weather-v${CACHE_VERSION}`;
 const ASSETS = [
   '/',
