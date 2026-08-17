@@ -4,8 +4,8 @@
   "description": "Current conditions, hourly & 10-day forecast",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#000000",
-  "theme_color": "#000000",
+  "background_color": "#ffa000",
+  "theme_color": "#ffb703",
   "icons": [
     {
       "src": "icons/icon-48.png",
