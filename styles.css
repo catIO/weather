@@ -993,6 +993,253 @@ header {
   color: var(--accent);
 }
 
+/* Dashboard two-column structure */
+.dashboard-col-left,
+.dashboard-col-right {
+  display: contents;
+}
+
+.precip-detail {
+  position: relative;
+}
+
+.radar-toggle-btn {
+  background: rgba(79, 195, 247, 0.12);
+  border: 1px solid rgba(79, 195, 247, 0.35);
+  color: var(--accent);
+  padding: 2px 7px;
+  border-radius: 6px;
+  font-size: 10px;
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  cursor: pointer;
+  margin-top: 4px;
+  align-self: center;
+  transition: all 0.2s ease;
+}
+
+.radar-toggle-btn:hover {
+  background: rgba(79, 195, 247, 0.24);
+  border-color: var(--accent);
+}
+
+.radar-toggle-btn .material-icons {
+  font-size: 12px;
+}
+
+/* ── Live Rain Radar Card ── */
+.radar-card {
+  padding: 16px;
+  margin-bottom: 20px;
+}
+
+.radar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.radar-title-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.radar-header h2 {
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--text);
+  margin: 0;
+}
+
+
+
+.radar-time-badge {
+  font-size: 11px;
+  color: var(--accent);
+  background: rgba(79, 195, 247, 0.12);
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-weight: 500;
+}
+
+.radar-map-wrapper {
+  position: relative;
+  width: 100%;
+  height: 270px;
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  background: #12121e;
+}
+
+.radar-map {
+  width: 100%;
+  height: 100%;
+  background: #12121e;
+}
+
+/* Dark filter for OSM basemap pane without affecting radar overlay */
+.leaflet-basemap-pane,
+.leaflet-basemapPane-pane {
+  filter: invert(100%) hue-rotate(180deg) brightness(85%) contrast(90%);
+}
+
+/* Ensure Leaflet controls match dark theme */
+.radar-map .leaflet-control-zoom {
+  border: 1px solid var(--border) !important;
+  background: var(--card) !important;
+  border-radius: 8px !important;
+  overflow: hidden;
+}
+
+.radar-map .leaflet-control-zoom a {
+  background: var(--card) !important;
+  color: var(--text) !important;
+  border-bottom: 1px solid var(--border) !important;
+}
+
+.radar-map .leaflet-control-attribution {
+  background: rgba(15, 15, 35, 0.75) !important;
+  color: var(--text-muted) !important;
+  font-size: 9px !important;
+}
+
+.radar-legend {
+  position: absolute;
+  bottom: 8px;
+  left: 8px;
+  z-index: 500;
+  background: rgba(18, 18, 36, 0.85);
+  backdrop-filter: blur(8px);
+  border: 1px solid var(--border);
+  padding: 4px 8px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  color: var(--text-muted);
+  pointer-events: none;
+}
+
+.legend-bar {
+  width: 60px;
+  height: 6px;
+  border-radius: 3px;
+  background: linear-gradient(to right, #73b2ff, #0040ff, #00e000, #ffea00, #ff0000, #ff00e0);
+}
+
+.radar-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.radar-play-btn {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 50%;
+  width: 34px;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all 0.2s ease;
+}
+
+.radar-play-btn:hover {
+  background: var(--accent);
+  color: #0b0b18;
+  border-color: var(--accent);
+}
+
+.radar-play-btn .material-icons {
+  font-size: 20px;
+}
+
+.radar-track-container {
+  flex: 1;
+  display: flex;
+  align-items: center;
+}
+
+#radarScrubber {
+  width: 100%;
+  height: 4px;
+  background: var(--border);
+  border-radius: 2px;
+  outline: none;
+  cursor: pointer;
+  accent-color: var(--accent);
+}
+
+.radar-frame-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  min-width: 48px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Custom pulsing marker for user location */
+.radar-location-pin {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid #ffffff;
+  box-shadow: 0 0 10px rgba(79, 195, 247, 0.8);
+}
+
+.radar-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* Expanded / Enlarged radar overlay */
+body.radar-modal-open {
+  overflow: hidden;
+}
+
+.radar-card.radar-expanded {
+  position: fixed;
+  inset: 20px;
+  z-index: 1050;
+  max-width: 1200px;
+  margin: auto;
+  height: calc(100vh - 40px);
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.85), 0 0 0 100vmax rgba(10, 10, 22, 0.82);
+  backdrop-filter: blur(12px);
+  border: 1px solid var(--border-light);
+  animation: modal-fade-in 0.2s ease-out;
+}
+
+.radar-card.radar-expanded .radar-map-wrapper {
+  flex: 1;
+  height: 100%;
+  min-height: 380px;
+}
+
+@media (max-width: 600px) {
+  .radar-card.radar-expanded {
+    inset: 8px;
+    height: calc(100vh - 16px);
+    padding: 12px;
+  }
+}
+
 /* Desktop Dashboard Layout */
 @media (min-width: 1024px) {
   #app {
@@ -1020,11 +1267,27 @@ header {
     width: 100%;
   }
 
-  #current {
+  .dashboard-col-left {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
     grid-column: 1;
-    grid-row: span 2;
+    width: 100%;
+  }
+
+  .dashboard-col-right {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    grid-column: 2;
+    width: 100%;
+    min-width: 0;
+  }
+
+  #current,
+  #radarCard {
     margin-bottom: 0;
-    align-self: start;
+    width: 100%;
   }
 
   /* Prevent details wrapping by switching to a 2-column grid */
@@ -1033,14 +1296,10 @@ header {
     gap: 12px;
   }
 
-  #hourly {
-    grid-column: 2;
-    min-width: 0;
-    /* Prevents overflow from stretching the grid track */
-  }
-
+  #hourly,
   #daily {
-    grid-column: 2;
+    margin-bottom: 0;
+    width: 100%;
     min-width: 0;
   }
 

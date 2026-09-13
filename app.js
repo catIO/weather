@@ -218,6 +218,16 @@ const stormAlertEl = $('stormAlert');
 const stormAlertIconEl = $('stormAlertIcon');
 const stormAlertTitleEl = $('stormAlertTitle');
 const stormAlertDetailEl = $('stormAlertDetail');
+const radarCardEl = $('radarCard');
+const radarToggleBtn = $('radarToggleBtn');
+const expandRadarBtn = $('expandRadarBtn');
+const expandRadarIcon = $('expandRadarIcon');
+const closeRadarBtn = $('closeRadarBtn');
+const radarPlayBtn = $('radarPlayBtn');
+const radarPlayIcon = $('radarPlayIcon');
+const radarScrubber = $('radarScrubber');
+const radarTimeLabel = $('radarTimeLabel');
+const radarFrameLabel = $('radarFrameLabel');
 let latestWeatherData = null;
 let latestAlerts = [];
 let latestNWSObservation = null;
@@ -588,6 +598,9 @@ async function fetchWeather(lat, lon, name, { silent = false, force = false } = 
     showLoading(true);
     hideError();
     hideWeather();
+  }
+  if (!currentLocation || currentLocation.lat !== lat || currentLocation.lon !== lon) {
+    isRadarDismissed = false;
   }
   currentLocation = { lat, lon, name };
   latestAlerts = [];
@@ -1000,6 +1013,12 @@ function renderCurrent(data, name) {
 
   // Update browser tab favicon dynamically to match the current condition emoji
   updateFavicon(icon);
+
+  // Update Live Radar visibility and auto-open if raining
+  const isRaining = precip > 0 || (code >= 51 && code <= 99) || (
+    latestAlerts && latestAlerts.some(a => /rain|flood|storm|thunderstorm|precipitation|shower/i.test(a.event || ''))
+  );
+  updateRadarVisibility(isRaining);
 
   currentEl.classList.remove('hidden');
 }
@@ -1747,6 +1766,301 @@ function updateFavicon(emoji) {
   }
 }
 
+// ── Live Rain Radar Controller ──
+let leafletLoadingPromise = null;
+function loadLeaflet() {
+  if (window.L) return Promise.resolve(window.L);
+  if (leafletLoadingPromise) return leafletLoadingPromise;
+
+  leafletLoadingPromise = new Promise((resolve, reject) => {
+    const link = document.createElement('link');
+    link.rel = 'stylesheet';
+    link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
+    document.head.appendChild(link);
+
+    const script = document.createElement('script');
+    script.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
+    script.onload = () => resolve(window.L);
+    script.onerror = () => {
+      leafletLoadingPromise = null;
+      reject(new Error('Failed to load Leaflet library'));
+    };
+    document.head.appendChild(script);
+  });
+
+  return leafletLoadingPromise;
+}
+
+let radarMap = null;
+let radarMarker = null;
+let radarTileLayers = []; // array of { time, path, layer }
+let currentRadarIndex = 0;
+let radarPlayInterval = null;
+let isRadarPlaying = false;
+let isRadarDismissed = false;
+let radarApiData = null;
+let radarApiLastFetch = 0;
+const RADAR_API_TTL = 10 * 60 * 1000;
+
+function stopRadarAnimation() {
+  if (radarPlayInterval) {
+    clearInterval(radarPlayInterval);
+    radarPlayInterval = null;
+  }
+  isRadarPlaying = false;
+  if (radarPlayIcon) radarPlayIcon.textContent = 'play_arrow';
+}
+
+function startRadarAnimation() {
+  if (radarTileLayers.length <= 1) return;
+  stopRadarAnimation();
+  isRadarPlaying = true;
+  if (radarPlayIcon) radarPlayIcon.textContent = 'pause';
+
+  radarPlayInterval = setInterval(() => {
+    let nextIdx = currentRadarIndex + 1;
+    if (nextIdx >= radarTileLayers.length) {
+      nextIdx = 0;
+    }
+    showRadarFrame(nextIdx);
+  }, 750);
+}
+
+function showRadarFrame(index) {
+  if (!radarTileLayers.length || index < 0 || index >= radarTileLayers.length) return;
+  currentRadarIndex = index;
+
+  radarTileLayers.forEach((frame, i) => {
+    if (i === index) {
+      if (!radarMap.hasLayer(frame.layer)) {
+        frame.layer.addTo(radarMap);
+      }
+      frame.layer.setOpacity(0.75);
+    } else {
+      if (radarMap.hasLayer(frame.layer)) {
+        frame.layer.setOpacity(0);
+      }
+    }
+  });
+
+  if (radarScrubber) radarScrubber.value = String(index);
+
+  const activeFrame = radarTileLayers[index];
+  if (activeFrame && activeFrame.time) {
+    const frameDate = new Date(activeFrame.time * 1000);
+    const timeStr = frameDate.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+    if (radarTimeLabel) radarTimeLabel.textContent = timeStr;
+
+    const diffMins = Math.round((Date.now() - frameDate.getTime()) / 60000);
+    if (radarFrameLabel) {
+      if (diffMins <= 5) {
+        radarFrameLabel.textContent = 'Live';
+      } else {
+        radarFrameLabel.textContent = `-${diffMins}m`;
+      }
+    }
+  }
+}
+
+async function initOrUpdateRadar(lat, lon, locationName) {
+  if (!radarCardEl) return;
+  radarCardEl.classList.remove('hidden');
+
+  try {
+    const L = await loadLeaflet();
+    if (!radarMap) {
+      radarMap = L.map('radarMap', {
+        zoomControl: true,
+        attributionControl: true,
+        fadeAnimation: true,
+        minZoom: 3,
+        maxZoom: 18
+      }).setView([lat, lon], 7);
+
+      if (!radarMap.getPane('basemapPane')) {
+        radarMap.createPane('basemapPane');
+      }
+      radarMap.getPane('basemapPane').style.zIndex = '100';
+
+      if (!radarMap.getPane('radarPane')) {
+        radarMap.createPane('radarPane');
+      }
+      radarMap.getPane('radarPane').style.zIndex = '400';
+      radarMap.getPane('radarPane').style.pointerEvents = 'none';
+
+      L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        pane: 'basemapPane',
+        minZoom: 3,
+        maxZoom: 18,
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>'
+      }).addTo(radarMap);
+
+      const pinIcon = L.divIcon({
+        className: 'radar-location-pin',
+        iconSize: [14, 14],
+        iconAnchor: [7, 7]
+      });
+      radarMarker = L.marker([lat, lon], { icon: pinIcon }).addTo(radarMap);
+      radarMarker.bindTooltip(locationName || 'Your Location');
+    } else {
+      radarMap.setView([lat, lon], 7);
+      if (!radarMap.getPane('basemapPane')) {
+        radarMap.createPane('basemapPane');
+      }
+      radarMap.getPane('basemapPane').style.zIndex = '100';
+      if (!radarMap.getPane('radarPane')) {
+        radarMap.createPane('radarPane');
+      }
+      radarMap.getPane('radarPane').style.zIndex = '400';
+      radarMap.getPane('radarPane').style.pointerEvents = 'none';
+
+      if (radarMarker) {
+        radarMarker.setLatLng([lat, lon]);
+        radarMarker.setTooltipContent(locationName || 'Your Location');
+      }
+      radarMap.invalidateSize();
+    }
+
+    if (!radarApiData || Date.now() - radarApiLastFetch > RADAR_API_TTL) {
+      const res = await fetch('https://api.rainviewer.com/public/weather-maps.json');
+      if (res.ok) {
+        radarApiData = await res.json();
+        radarApiLastFetch = Date.now();
+      }
+    }
+
+    if (radarApiData && radarApiData.radar?.past?.length) {
+      const host = radarApiData.host || 'https://tilecache.rainviewer.com';
+      const past = radarApiData.radar.past.slice(-12);
+
+      const oldTimes = new Set(radarTileLayers.map(f => f.time));
+      const newTimes = new Set(past.map(f => f.time));
+      const timestampsDiffer = oldTimes.size !== newTimes.size || [...newTimes].some(t => !oldTimes.has(t));
+
+      if (timestampsDiffer) {
+        radarTileLayers.forEach(f => {
+          if (radarMap.hasLayer(f.layer)) radarMap.removeLayer(f.layer);
+        });
+        radarTileLayers = past.map(f => {
+          const layer = L.tileLayer(`${host}${f.path}/256/{z}/{x}/{y}/2/1_1.png`, {
+            pane: 'radarPane',
+            opacity: 0,
+            tileSize: 256,
+            minZoom: 3,
+            maxZoom: 18,
+            maxNativeZoom: 7
+          });
+          return { time: f.time, path: f.path, layer };
+        });
+      }
+
+      if (radarScrubber) {
+        radarScrubber.min = '0';
+        radarScrubber.max = String(radarTileLayers.length - 1);
+        radarScrubber.value = String(radarTileLayers.length - 1);
+      }
+
+      showRadarFrame(radarTileLayers.length - 1);
+      setTimeout(() => radarMap && radarMap.invalidateSize(), 150);
+    }
+  } catch (err) {
+    console.warn('Radar initialization failed:', err);
+  }
+}
+
+let isRadarExpanded = false;
+
+function toggleRadarExpand(force) {
+  if (!radarCardEl) return;
+  isRadarExpanded = force !== undefined ? force : !isRadarExpanded;
+  radarCardEl.classList.toggle('radar-expanded', isRadarExpanded);
+  document.body.classList.toggle('radar-modal-open', isRadarExpanded);
+  if (expandRadarIcon) {
+    expandRadarIcon.textContent = isRadarExpanded ? 'close_fullscreen' : 'open_in_full';
+  }
+  if (expandRadarBtn) {
+    const label = isRadarExpanded ? 'Restore view' : 'Enlarge view';
+    expandRadarBtn.setAttribute('title', label);
+    expandRadarBtn.setAttribute('aria-label', label);
+    expandRadarBtn.blur();
+  }
+  setTimeout(() => {
+    if (radarMap) radarMap.invalidateSize();
+  }, 100);
+}
+
+function updateRadarVisibility(isRaining) {
+  if (isRaining) {
+    radarToggleBtn?.classList.remove('hidden');
+    if (!isRadarDismissed && currentLocation) {
+      initOrUpdateRadar(currentLocation.lat, currentLocation.lon, currentLocation.name);
+    }
+  } else {
+    if (radarCardEl?.classList.contains('hidden')) {
+      radarToggleBtn?.classList.add('hidden');
+    }
+  }
+}
+
+// Radar event listeners
+radarToggleBtn?.addEventListener('click', (e) => {
+  e.preventDefault();
+  if (!radarCardEl) return;
+  isRadarDismissed = false;
+  if (radarCardEl.classList.contains('hidden')) {
+    if (currentLocation) {
+      initOrUpdateRadar(currentLocation.lat, currentLocation.lon, currentLocation.name);
+    }
+  }
+  radarCardEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+});
+
+expandRadarBtn?.addEventListener('click', () => {
+  toggleRadarExpand();
+});
+
+closeRadarBtn?.addEventListener('click', () => {
+  if (!radarCardEl) return;
+  toggleRadarExpand(false);
+  radarCardEl.classList.add('hidden');
+  stopRadarAnimation();
+  isRadarDismissed = true;
+});
+
+window.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && isRadarExpanded) {
+    toggleRadarExpand(false);
+    return;
+  }
+  if (e.code === 'Space' || e.key === ' ') {
+    const active = document.activeElement;
+    if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.tagName === 'SELECT')) {
+      if (active !== radarScrubber) return;
+    }
+    if (isRadarExpanded || (!radarCardEl?.classList.contains('hidden') && radarCardEl?.contains(active))) {
+      e.preventDefault();
+      if (isRadarPlaying) {
+        stopRadarAnimation();
+      } else {
+        startRadarAnimation();
+      }
+    }
+  }
+});
+
+radarPlayBtn?.addEventListener('click', () => {
+  if (isRadarPlaying) {
+    stopRadarAnimation();
+  } else {
+    startRadarAnimation();
+  }
+});
+
+radarScrubber?.addEventListener('input', (e) => {
+  stopRadarAnimation();
+  showRadarFrame(parseInt(e.target.value, 10) || 0);
+});
+
 // ── Helpers ──
 function showLoading(show) {
   loadingEl.classList.toggle('hidden', !show);
@@ -1765,6 +2079,11 @@ function hideWeather() {
   currentEl.classList.add('hidden');
   hourlyEl.classList.add('hidden');
   dailyEl.classList.add('hidden');
+  if (radarCardEl) {
+    toggleRadarExpand(false);
+    radarCardEl.classList.add('hidden');
+  }
+  stopRadarAnimation();
 }
 
 function showRefreshIndicator(show) {
@@ -1807,6 +2126,9 @@ function refreshWeatherIfNeeded() {
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible') {
     refreshWeatherIfNeeded();
+    if (radarMap) radarMap.invalidateSize();
+  } else {
+    stopRadarAnimation();
   }
 });
 

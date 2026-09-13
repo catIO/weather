@@ -110,92 +110,131 @@
       <p>Wishing you clear skies and fair winds.</p>
     </div>
 
-    <!-- Current Conditions -->
-    <section id="current" class="card hidden">
-      <div class="current-header">
-        <div class="current-header-top">
-          <h1 id="cityName"></h1>
-          <span id="refreshIndicator" class="refresh-indicator hidden" aria-hidden="true"></span>
+    <div class="dashboard-col-left">
+      <!-- Current Conditions -->
+      <section id="current" class="card hidden">
+        <div class="current-header">
+          <div class="current-header-top">
+            <h1 id="cityName"></h1>
+            <span id="refreshIndicator" class="refresh-indicator hidden" aria-hidden="true"></span>
+          </div>
+          <span id="currentDate"></span>
         </div>
-        <span id="currentDate"></span>
-      </div>
-      <div class="current-main">
-        <div class="current-temp interactive" id="weatherSummaryBtn" role="button" tabindex="0"
-          aria-label="View activity outlook" title="Click for upcoming activity outlook">
-          <span id="weatherIcon" class="weather-icon"></span>
-          <span id="currentTemp"></span>
+        <div class="current-main">
+          <div class="current-temp interactive" id="weatherSummaryBtn" role="button" tabindex="0"
+            aria-label="View activity outlook" title="Click for upcoming activity outlook">
+            <span id="weatherIcon" class="weather-icon"></span>
+            <span id="currentTemp"></span>
+          </div>
+          <span id="weatherDesc" class="weather-desc"></span>
         </div>
-        <span id="weatherDesc" class="weather-desc"></span>
-      </div>
-      <!-- Thunderstorm Alert -->
-      <div id="stormAlert" class="storm-alert hidden">
-        <span id="stormAlertIcon" class="storm-alert-icon"></span>
-        <div class="storm-alert-body">
-          <strong id="stormAlertTitle"></strong>
-          <span id="stormAlertDetail"></span>
+        <!-- Thunderstorm Alert -->
+        <div id="stormAlert" class="storm-alert hidden">
+          <span id="stormAlertIcon" class="storm-alert-icon"></span>
+          <div class="storm-alert-body">
+            <strong id="stormAlertTitle"></strong>
+            <span id="stormAlertDetail"></span>
+          </div>
         </div>
-      </div>
-      <div class="current-details">
-        <div class="detail"
-          title="The temperature at which air reaches 100% saturation and water vapor condenses. A smaller spread between dew point and air temperature indicates higher moisture content and reduced evaporative cooling.">
-          <span class="detail-label">Dew Point</span>
-          <span id="dewPoint" class="detail-value"></span>
+        <div class="current-details">
+          <div class="detail"
+            title="The temperature at which air reaches 100% saturation and water vapor condenses. A smaller spread between dew point and air temperature indicates higher moisture content and reduced evaporative cooling.">
+            <span class="detail-label">Dew Point</span>
+            <span id="dewPoint" class="detail-value"></span>
+          </div>
+          <div class="detail"
+            title="Ratio of actual water vapor partial pressure to saturation vapor pressure at the current temperature, expressed as a percentage. Determines evaporation rate and perceived thermal comfort.">
+            <span class="detail-label">Humidity</span>
+            <span id="humidity" class="detail-value"></span>
+          </div>
+          <div class="detail"
+            title="10-meter sustained wind speed (2-minute mean). Gusts represent peak 3-second wind speeds caused by turbulent eddies and convective downdrafts.">
+            <span class="detail-label">Wind Speed</span>
+            <span id="windSpeed" class="detail-value"></span>
+            <span id="windGusts" class="wind-gusts" style="display: none;"></span>
+          </div>
+          <div class="detail"
+            title="Meteorological wind direction — the azimuth FROM which the wind originates, measured clockwise from true north (0°/360° = N, 90° = E, 180° = S, 270° = W).">
+            <span class="detail-label">Wind Direction</span>
+            <span id="windDir" class="detail-value"></span>
+          </div>
+          <div class="detail precip-detail"
+            title="Instantaneous precipitation intensity (liquid equivalent). Light: <2.5 mm/hr, Moderate: 2.5–7.6 mm/hr, Heavy: >7.6 mm/hr. Derived from radar reflectivity and numerical weather prediction models.">
+            <span class="detail-label">Precip Rate</span>
+            <span id="precipRate" class="detail-value"></span>
+            <button id="radarToggleBtn" class="radar-toggle-btn hidden" aria-label="View live radar map" title="View Live Radar">
+              Live Radar
+            </button>
+          </div>
+          <div class="detail"
+            title="Convective Available Potential Energy (J/kg) — the vertically integrated positive buoyancy of an adiabatically lifted parcel. Quantifies maximum possible updraft kinetic energy. >500: marginal instability, >1000: moderate, >2500: extreme. Primary predictor of convective intensity.">
+            <span class="detail-label">CAPE</span>
+            <span id="cape" class="detail-value"></span>
+          </div>
+          <div class="detail"
+            title="Mean sea-level pressure (QNH reduced to MSL using ICAO standard atmosphere). Pressure tendency over 3 hours indicates synoptic-scale forcing: rapid falls (>2 hPa/3hr) suggest approaching cyclonic systems or frontal passages.">
+            <span class="detail-label">Pressure</span>
+            <span id="pressure" class="detail-value"></span>
+          </div>
+          <div class="detail"
+            title="Clear-sky UV Index — erythemal irradiance weighted by the CIE action spectrum, normalized to 25 mW/m². Accounts for solar zenith angle, total column ozone, and altitude. Scale: 1–2 Low, 3–5 Moderate, 6–7 High, 8–10 Very High, 11+ Extreme.">
+            <span class="detail-label">UV Index</span>
+            <span id="uvIndex" class="detail-value"></span>
+          </div>
+          <div class="detail hidden"
+            title="U.S. Air Quality Index (AQI) calculated from PM2.5 and PM10 concentrations. 0–50: Good, 51–100: Moderate, 101–150: Unhealthy for Sensitive Groups, 151–200: Unhealthy, 201–300: Very Unhealthy, 301+: Hazardous.">
+            <span class="detail-label">Air Quality</span>
+            <span id="aqiValue" class="detail-value">—</span>
+          </div>
         </div>
-        <div class="detail"
-          title="Ratio of actual water vapor partial pressure to saturation vapor pressure at the current temperature, expressed as a percentage. Determines evaporation rate and perceived thermal comfort.">
-          <span class="detail-label">Humidity</span>
-          <span id="humidity" class="detail-value"></span>
-        </div>
-        <div class="detail"
-          title="10-meter sustained wind speed (2-minute mean). Gusts represent peak 3-second wind speeds caused by turbulent eddies and convective downdrafts.">
-          <span class="detail-label">Wind Speed</span>
-          <span id="windSpeed" class="detail-value"></span>
-          <span id="windGusts" class="wind-gusts" style="display: none;"></span>
-        </div>
-        <div class="detail"
-          title="Meteorological wind direction — the azimuth FROM which the wind originates, measured clockwise from true north (0°/360° = N, 90° = E, 180° = S, 270° = W).">
-          <span class="detail-label">Wind Direction</span>
-          <span id="windDir" class="detail-value"></span>
-        </div>
-        <div class="detail"
-          title="Instantaneous precipitation intensity (liquid equivalent). Light: <2.5 mm/hr, Moderate: 2.5–7.6 mm/hr, Heavy: >7.6 mm/hr. Derived from radar reflectivity and numerical weather prediction models.">
-          <span class="detail-label">Precip Rate</span>
-          <span id="precipRate" class="detail-value"></span>
-        </div>
-        <div class="detail"
-          title="Convective Available Potential Energy (J/kg) — the vertically integrated positive buoyancy of an adiabatically lifted parcel. Quantifies maximum possible updraft kinetic energy. >500: marginal instability, >1000: moderate, >2500: extreme. Primary predictor of convective intensity.">
-          <span class="detail-label">CAPE</span>
-          <span id="cape" class="detail-value"></span>
-        </div>
-        <div class="detail"
-          title="Mean sea-level pressure (QNH reduced to MSL using ICAO standard atmosphere). Pressure tendency over 3 hours indicates synoptic-scale forcing: rapid falls (>2 hPa/3hr) suggest approaching cyclonic systems or frontal passages.">
-          <span class="detail-label">Pressure</span>
-          <span id="pressure" class="detail-value"></span>
-        </div>
-        <div class="detail"
-          title="Clear-sky UV Index — erythemal irradiance weighted by the CIE action spectrum, normalized to 25 mW/m². Accounts for solar zenith angle, total column ozone, and altitude. Scale: 1–2 Low, 3–5 Moderate, 6–7 High, 8–10 Very High, 11+ Extreme.">
-          <span class="detail-label">UV Index</span>
-          <span id="uvIndex" class="detail-value"></span>
-        </div>
-        <div class="detail hidden"
-          title="U.S. Air Quality Index (AQI) calculated from PM2.5 and PM10 concentrations. 0–50: Good, 51–100: Moderate, 101–150: Unhealthy for Sensitive Groups, 151–200: Unhealthy, 201–300: Very Unhealthy, 301+: Hazardous.">
-          <span class="detail-label">Air Quality</span>
-          <span id="aqiValue" class="detail-value">—</span>
-        </div>
-      </div>
-    </section>
+      </section>
 
-    <!-- Hourly Forecast -->
-    <section id="hourly" class="card hidden">
-      <h2>Hourly Forecast</h2>
-      <div id="hourlyList" class="hourly-scroll"></div>
-    </section>
+      <!-- Live Rain Radar -->
+      <section id="radarCard" class="card hidden radar-card">
+        <div class="radar-header">
+          <div class="radar-title-group">
+            <h2>Live Radar</h2>
+            <span id="radarTimeLabel" class="radar-time-badge">Loading...</span>
+          </div>
+          <div class="radar-header-actions">
+            <button id="expandRadarBtn" class="icon-btn" aria-label="Enlarge radar view" title="Enlarge view">
+              <span class="material-icons" id="expandRadarIcon">open_in_full</span>
+            </button>
+          </div>
+        </div>
+        <div id="radarMapContainer" class="radar-map-wrapper">
+          <div id="radarMap" class="radar-map"></div>
+          <div id="radarLegend" class="radar-legend">
+            <span class="legend-text">Rain</span>
+            <span class="legend-bar"></span>
+            <span class="legend-text">Heavy / Storm</span>
+          </div>
+        </div>
+        <div class="radar-controls">
+          <button id="radarPlayBtn" class="radar-play-btn" aria-label="Play animation" title="Play / Pause">
+            <span class="material-icons" id="radarPlayIcon">play_arrow</span>
+          </button>
+          <div class="radar-track-container">
+            <input type="range" id="radarScrubber" min="0" max="0" value="0" step="1" aria-label="Radar timeline scrubber" />
+          </div>
+          <span id="radarFrameLabel" class="radar-frame-label">Live</span>
+        </div>
+      </section>
+    </div>
 
-    <!-- 10-Day Forecast -->
-    <section id="daily" class="card hidden">
-      <h2>10-Day Forecast</h2>
-      <div id="dailyList" class="daily-list"></div>
-    </section>
+    <div class="dashboard-col-right">
+      <!-- Hourly Forecast -->
+      <section id="hourly" class="card hidden">
+        <h2>Hourly Forecast</h2>
+        <div id="hourlyList" class="hourly-scroll"></div>
+      </section>
+
+      <!-- 10-Day Forecast -->
+      <section id="daily" class="card hidden">
+        <h2>10-Day Forecast</h2>
+        <div id="dailyList" class="daily-list"></div>
+      </section>
+    </div>
 
     <footer class="attribution">
       Weather data by <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo</a>

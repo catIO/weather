@@ -91,13 +91,24 @@ In [`app.js`](../app.js) (`renderHourly`):
    - **Headers**: `User-Agent: (weather-pwa, contact@example.com)`
    - **Usage**: Fetches ground station telemetry (dew point, relative humidity, wind speed, gusts, direction, precipitation in last hour, barometric pressure, structured present weather, raw METAR). Rejects observations older than 60 minutes.
 
+### Radar & Map APIs
+
+8. **RainViewer Radar Metadata API**
+   - **URL**: `https://api.rainviewer.com/public/weather-maps.json`
+   - **Tile URL**: `https://tilecache.rainviewer.com{path}/256/{z}/{x}/{y}/2/1_1.png`
+   - **Usage**: Provides global composite Doppler radar timestamps and tile paths for past 2 hours of animated sweeps. Lazy-loaded only when precipitation is active or user requests live radar.
+
+9. **CartoDB Dark Matter Basemap**
+   - **URL**: `https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png`
+   - **Usage**: Seamless dark-mode map tiles loaded on demand for the radar map viewport.
+
 ### Search & Geolocation Support APIs
 
-8. **Open-Meteo Geocoding API**
+10. **Open-Meteo Geocoding API**
    - **URL**: `https://geocoding-api.open-meteo.com/v1/search?name={query}&count=5&language=en&format=json`
    - **Usage**: Provides autocomplete suggestions for location search in header input.
 
-9. **ipapi Country Detection API**
+11. **ipapi Country Detection API**
    - **URL**: `https://ipapi.co/country/`
    - **Usage**: Detects country code on first visit to configure default units (°F/mph/in vs °C/km/h/mm).
 
