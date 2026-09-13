@@ -2111,7 +2111,7 @@ function showRefreshIndicator(show) {
   refreshIndicatorEl.classList.toggle('hidden', !show);
 }
 
-// ── Service Worker Registration ──
+// ── Service Worker Registration & Auto-Update Check ──
 if ('serviceWorker' in navigator) {
   let refreshing = false;
   // When a new SW takes control, reload once to serve fresh assets
@@ -2122,7 +2122,29 @@ if ('serviceWorker' in navigator) {
     }
   });
 
-  navigator.serviceWorker.register('sw.js');
+  navigator.serviceWorker.register('sw.js').then((reg) => {
+    let lastSwCheck = Date.now();
+    const checkSwUpdate = () => {
+      // Throttle update checks to at most once every 30 seconds
+      if (Date.now() - lastSwCheck > 30 * 1000) {
+        lastSwCheck = Date.now();
+        reg.update().catch(() => {});
+      }
+    };
+
+    // Check for updates on initial launch
+    reg.update().catch(() => {});
+
+    // Check for updates whenever returning to the tab or bringing screen into focus
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') {
+        checkSwUpdate();
+      }
+    });
+    window.addEventListener('focus', checkSwUpdate);
+  }).catch((err) => {
+    console.warn('SW registration failed:', err);
+  });
 }
 
 // ── Refresh on focus (if data is stale) ──

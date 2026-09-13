@@ -3,8 +3,8 @@ const CACHE_NAME = `weather-v${CACHE_VERSION}`;
 const ASSETS = [
   '/',
   '/index.html',
-  '/styles.css',
-  '/app.js',
+  '/styles.css?v=26',
+  '/app.js?v=26',
   '/icons/icon-192.png',
   '/icons/icon-512.png'
 ];
@@ -39,6 +39,6 @@ self.addEventListener('fetch', (e) => {
         caches.open(CACHE_NAME).then((cache) => cache.put(e.request, clone));
         return res;
       })
-      .catch(() => caches.match(e.request))
+      .catch(() => caches.match(e.request, { ignoreSearch: true }))
   );
 });
