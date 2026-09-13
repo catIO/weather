@@ -685,7 +685,8 @@ function deriveCurrentCode(data) {
   const obs = latestNWSObservation;
   const c = data.current;
   let code = c.weather_code;
-  const precip = c.precipitation ?? 0; // mm or inch depending on unit
+  const obsPrecip = (obs?.precipitation != null && obs.precipitation > 0) ? obs.precipitation : 0;
+  const precip = (c.precipitation != null && c.precipitation > 0) ? c.precipitation : obsPrecip; // mm or inch depending on unit
 
   // --- Priority 0: Active severe WARNING upgrade ---
   // Only active severe WARNINGS (e.g. Severe Thunderstorm Warning, Tornado Warning) force condition upgrades.
@@ -794,9 +795,18 @@ function deriveCurrentCode(data) {
     }
   }
 
-  // Active ground observation upgrade: if model says dry (code <= 3) but NWS station observes active rain/snow
-  if (code <= 3 && obs?.weatherCode >= 51) {
-    code = obs.weatherCode;
+  // Active ground observation upgrade: if model says dry (code <= 3) or drizzle (51..57) while ground station observes active rain/snow (>= 61)
+  if (code <= 3 || (code < 61 && obs?.weatherCode >= 61)) {
+    if (obs?.weatherCode != null && obs.weatherCode >= 51) {
+      code = obs.weatherCode;
+    } else if (obs?.precipitation != null && obs.precipitation > 0) {
+      const isInch = settings.precipUnit === 'inch';
+      const heavy = isInch ? 0.3 : 7.6;
+      const moderate = isInch ? 0.1 : 2.5;
+      if (obs.precipitation >= heavy) code = 65;
+      else if (obs.precipitation >= moderate) code = 63;
+      else code = 61;
+    }
   }
 
   return code;
@@ -819,7 +829,9 @@ function renderCurrent(data, name) {
   const gusts = c.wind_gusts_10m;
   const isCalm = windSpeed === 0;
   const windDir = c.wind_direction_10m;
-  const precip = c.precipitation ?? 0;
+  const precip = (obs?.precipitation != null && obs.precipitation > 0)
+    ? obs.precipitation
+    : (c.precipitation ?? 0);
 
   // Description comes from deriveCurrentCode (Open-Meteo model), not NWS text
 
@@ -1145,6 +1157,85 @@ function mapNWSTextToWmoCode(text) {
   return null;
 }
 
+function parseNWSObservationCode(p) {
+  if (!p) return null;
+
+  // 1. Structured presentWeather array
+  if (Array.isArray(p.presentWeather) && p.presentWeather.length > 0) {
+    for (const item of p.presentWeather) {
+      const w = (item.weather || '').toLowerCase();
+      const raw = (item.rawString || '').toUpperCase();
+      const intensity = (item.intensity || '').toLowerCase();
+      const modifier = (item.modifier || '').toLowerCase();
+
+      if (w.includes('thunderstorm') || raw.includes('TS')) {
+        if (modifier.includes('vicinity') || raw.includes('VCTS')) return 94;
+        return 95;
+      }
+      if (w.includes('rain') || raw.includes('RA')) {
+        if (intensity === 'heavy' || raw.startsWith('+')) return 65;
+        if (intensity === 'light' || raw.startsWith('-')) return 61;
+        return 63;
+      }
+      if (w.includes('drizzle') || raw.includes('DZ')) {
+        if (intensity === 'heavy' || raw.startsWith('+')) return 55;
+        if (intensity === 'light' || raw.startsWith('-')) return 51;
+        return 53;
+      }
+      if (w.includes('snow') || raw.includes('SN')) {
+        if (intensity === 'heavy' || raw.startsWith('+')) return 75;
+        if (intensity === 'light' || raw.startsWith('-')) return 71;
+        return 73;
+      }
+      if (w.includes('ice') || w.includes('hail') || raw.includes('PL') || raw.includes('GR')) {
+        return 73;
+      }
+      if (w.includes('fog') || raw.includes('FG')) {
+        return 45;
+      }
+    }
+  }
+
+  // 2. Raw METAR message tokens (e.g. VCTS, +RA, -RA, RA, TSRA, DZ, SN)
+  if (p.rawMessage && typeof p.rawMessage === 'string') {
+    const raw = p.rawMessage.toUpperCase();
+    if (/\bVCTS\b/.test(raw)) return 94;
+    if (/\b(\+|-)?TSRA\b|\bTS\b/.test(raw)) return 95;
+    if (/\b\+RA\b/.test(raw)) return 65;
+    if (/\b-RA\b/.test(raw)) return 61;
+    if (/\bRA\b/.test(raw)) return 63;
+    if (/\b\+DZ\b/.test(raw)) return 55;
+    if (/\b-DZ\b/.test(raw)) return 51;
+    if (/\bDZ\b/.test(raw)) return 53;
+    if (/\b\+SN\b/.test(raw)) return 75;
+    if (/\b-SN\b/.test(raw)) return 71;
+    if (/\bSN\b/.test(raw)) return 73;
+    if (/\bFG\b/.test(raw)) return 45;
+  }
+
+  // 3. Positive precipitation rate (takes precedence over generic dry/cloudy text <= 3)
+  let precipCode = null;
+  if (p.precipitationLastHour?.value != null && p.precipitationLastHour.value > 0.00005) {
+    const mm = p.precipitationLastHour.value * 1000;
+    if (mm >= 7.6) precipCode = 65;
+    else if (mm >= 2.5) precipCode = 63;
+    else precipCode = 61;
+  }
+
+  // 4. Fallback to textDescription
+  const fromText = mapNWSTextToWmoCode(p.textDescription);
+  if (fromText != null) {
+    // If text reports active storm/snow/rain (>= 51) or fog (45), prefer it
+    if (fromText >= 51 || fromText === 45) return fromText;
+    // If text was generic sky cover (0..3) but ground gauge measured rain, return rain code
+    if (precipCode != null) return precipCode;
+    return fromText;
+  }
+
+  if (precipCode != null) return precipCode;
+  return null;
+}
+
 function parseNWSValue(property, targetUnit) {
   if (!property || property.value == null) return null;
   const val = property.value;
@@ -1190,8 +1281,13 @@ function parseNWSValue(property, targetUnit) {
 
 function parseNWSPrecip(property) {
   if (!property || property.value == null) return null;
-  const val = property.value; // meters
-  const valMm = val * 1000; // meters to mm
+  const val = property.value;
+  const unit = property.unitCode || '';
+  // NWS typically returns 'wmoUnit:mm' (millimeters). If explicitly meters ('wmoUnit:m' and not mm), convert.
+  let valMm = val;
+  if (unit.includes('wmoUnit:m') && !unit.includes('mm')) {
+    valMm = val * 1000;
+  }
   if (settings.precipUnit === 'inch') {
     return valMm * 0.0393701; // mm to inches
   }
@@ -1252,12 +1348,11 @@ async function fetchNWSObservation(lat, lon) {
             Math.cos(lat * Math.PI / 180) * Math.cos(coords[1] * Math.PI / 180) *
             Math.sin(dLon / 2) ** 2;
           const dist = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-          return { id: f.properties?.stationIdentifier, dist };
+          return { id: f.properties?.stationIdentifier, dist, distMiles: dist * 3959 };
         })
         .filter(s => s && s.id)
         .sort((a, b) => a.dist - b.dist)
-        .slice(0, 3)
-        .map(s => s.id);
+        .slice(0, 3);
 
       if (ranked.length === 0) return;
       stationIds = ranked;
@@ -1266,11 +1361,16 @@ async function fetchNWSObservation(lat, lon) {
       localStorage.setItem(cacheTsKey, String(Date.now()));
     }
 
-    // Try each station in order; accept the first with fresh, complete data
+    // Inspect candidate stations; use primary for ground metrics and evaluate consensus for rain
+    const candidates = [];
     const NWS_HEADERS = { 'User-Agent': '(weather-pwa, contact@example.com)' };
     const MAX_AGE_MS = 60 * 60 * 1000; // 60 minutes
 
-    for (const sid of stationIds) {
+    for (const s of stationIds) {
+      const sid = typeof s === 'string' ? s : s.id;
+      const sDistMiles = typeof s === 'object' && s.distMiles != null ? s.distMiles : null;
+      if (!sid) continue;
+
       try {
         const obsRes = await fetch(
           `https://api.weather.gov/stations/${sid}/observations/latest`,
@@ -1286,17 +1386,30 @@ async function fetchNWSObservation(lat, lon) {
         const obsAgeMs = obsTimestamp ? Date.now() - obsTimestamp.getTime() : 0;
         if (obsAgeMs > MAX_AGE_MS) continue;
 
-        // Reject incomplete observations (missing wind direction means partial report)
-        const hasWindDir = p.windDirection?.value != null;
+        // Validate wind direction: accept calm, light winds (<= 6 kt / 3.1 m/s), or variable winds (VRB)
+        const windSpeedVal = p.windSpeed?.value;
         const isCalm = p.windSpeed?.value === 0;
-        if (!hasWindDir && !isCalm) continue;
+        const isLightOrVariable = isCalm || (windSpeedVal != null && (
+          (p.windSpeed?.unitCode?.includes('m_s') && windSpeedVal <= 3.1) ||
+          (p.windSpeed?.unitCode?.includes('km_h') && windSpeedVal <= 11) ||
+          (p.windSpeed?.unitCode?.includes('knot') && windSpeedVal <= 6)
+        )) || /VRB/i.test(p.rawMessage || '');
+
+        const hasWindDir = p.windDirection?.value != null;
+        if (!hasWindDir && !isLightOrVariable) continue;
 
         const nwsWindSpeed = parseNWSValue(p.windSpeed, 'wind');
         const nwsWindDir = (nwsWindSpeed === 0 || p.windDirection?.value == null)
           ? null
           : p.windDirection.value;
 
-        latestNWSObservation = {
+        const parsedPrecip = parseNWSPrecip(p.precipitationLastHour);
+        const parsedCode = parseNWSObservationCode(p);
+        const hasPNO = /PNO|P\$/i.test(p.rawMessage || '');
+
+        candidates.push({
+          stationId: sid,
+          distMiles: sDistMiles,
           temperature: parseNWSValue(p.temperature, 'temp'),
           humidity: p.relativeHumidity?.value,
           windSpeed: nwsWindSpeed,
@@ -1304,23 +1417,55 @@ async function fetchNWSObservation(lat, lon) {
           windDirection: nwsWindDir,
           calm: nwsWindSpeed === 0,
           textDescription: p.textDescription,
-          weatherCode: mapNWSTextToWmoCode(p.textDescription),
+          weatherCode: parsedCode,
           dewPoint: parseNWSValue(p.dewPoint, 'temp'),
-          precipitation: parseNWSPrecip(p.precipitationLastHour),
-          pressure: parseNWSValue(p.barometricPressure, 'pressure')
-        };
-
-        if (latestWeatherData && currentLocation) {
-          renderCurrent(latestWeatherData, currentLocation.name);
-        }
-        return; // Found a good station, done
+          precipitation: parsedPrecip,
+          pressure: parseNWSValue(p.barometricPressure, 'pressure'),
+          hasPNO
+        });
       } catch {
-        continue; // Try next station
+        continue;
       }
     }
 
-    // All stations were stale or incomplete — no NWS override
-    console.warn('No NWS station returned a complete, fresh observation');
+    if (candidates.length === 0) {
+      console.warn('No NWS station returned a complete, fresh observation');
+      return;
+    }
+
+    // Station 0 is the primary station (closest by distance)
+    const primary = candidates[0];
+
+    // Multi-station consensus: if primary station reports dry/cloudy (weatherCode <= 3 or null)
+    // or has an inoperative precipitation sensor (hasPNO or precipitation == null),
+    // check if a neighboring candidate within 10 miles observes active precipitation (weatherCode >= 51 or precipitation > 0)
+    const primaryIsDry = primary.weatherCode == null || primary.weatherCode <= 3;
+    if (primaryIsDry || primary.hasPNO || primary.precipitation == null) {
+      const rainCandidate = candidates.slice(1).find(c => {
+        const isNearby = c.distMiles == null || c.distMiles <= 10;
+        const hasRain = (c.weatherCode != null && c.weatherCode >= 51) || (c.precipitation != null && c.precipitation > 0);
+        return isNearby && hasRain;
+      });
+
+      if (rainCandidate) {
+        if (rainCandidate.weatherCode != null && rainCandidate.weatherCode >= 51) {
+          primary.weatherCode = rainCandidate.weatherCode;
+        }
+        if (rainCandidate.precipitation != null && rainCandidate.precipitation > 0) {
+          primary.precipitation = rainCandidate.precipitation;
+        }
+        if (rainCandidate.textDescription) {
+          primary.textDescription = rainCandidate.textDescription;
+        }
+        primary.precipStation = rainCandidate.stationId;
+      }
+    }
+
+    latestNWSObservation = primary;
+
+    if (latestWeatherData && currentLocation) {
+      renderCurrent(latestWeatherData, currentLocation.name);
+    }
   } catch (err) {
     console.warn('NWS Observations fetch failed:', err);
   }
@@ -1658,8 +1803,7 @@ function refreshWeatherIfNeeded() {
   }
 }
 
-// Refresh only when user returns to the page (visibility/focus/pageshow),
-// and only if data is more than 10 minutes stale. No periodic background polling.
+// Refresh when user returns to the page (visibility/focus/pageshow) or periodically while visible
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible') {
     refreshWeatherIfNeeded();
@@ -1671,6 +1815,13 @@ window.addEventListener('pageshow', () => {
 });
 
 window.addEventListener('focus', refreshWeatherIfNeeded);
+
+// Periodically check every 60 seconds while open on screen, refreshing if data > 10 min stale
+setInterval(() => {
+  if (document.visibilityState === 'visible') {
+    refreshWeatherIfNeeded();
+  }
+}, 60 * 1000);
 
 // ── Load last viewed or first saved location on startup ──
 // ── Parse location from URL hash ──

@@ -27,8 +27,16 @@ In [`app.js`](../app.js) (`renderCurrent`), metric tiles prioritize **NWS Ground
 Condition text and icons are derived in `deriveCurrentCode` using a hybrid model + observation strategy:
 - **Priority 0 (NWS Severe Warning Event Titles)**: Severe warnings/watches matching event titles (e.g. *Severe Thunderstorm Warning*, *Tornado Warning*) force active storm (`95`), heavy rain (`65`), or snow (`75`) codes. Text inside advisory descriptions is ignored to avoid false positives from non-warning statements.
 - **Priority 1 (Convective/Lightning Check)**: Active minutely_15 lightning potential ($LPI > 0.1$) or storm codes with zero precipitation map to **Thunderstorm in vicinity** (`94`, icon `🌩️`). Active precipitation + lightning maps to active **Thunderstorm** (`95`, icon `⛈️`).
-- **Priority 2 (Precipitation Intensity)**: Active precipitation rate sets rain intensity (Slight `61`, Moderate `63`, Heavy `65`).
+- **Priority 2 (Precipitation Intensity)**: Active precipitation rate (from model or ground observation) sets rain intensity (Slight `61`, Moderate `63`, Heavy `65`).
 - **Priority 3 (Hybrid Validation)**: If NWS station observes *"Thunderstorm in Vicinity"* or model storm code exists without local rain, sets **Thunderstorm in vicinity** (`94`). If ground observation is dry ($\le 45$) and lightning potential is absent ($LPI \le 0.1$), prioritizes coordinate-specific grid cloud cover (`cloud_cover`) to set sky cover (`0..3`), falling back to NWS station observation or model weather code if cloud cover is missing.
+- **Ground Observation Rain Upgrade**: If model indicates dry sky (`code <= 3`) or light drizzle (`code < 61`), ground station observations of active precipitation (`obs.weatherCode >= 51` or `obs.precipitation > 0`) upgrade the condition directly to rain/snow/storm.
+
+### 1.2 Multi-Station Consensus & Sensor Fallback
+
+- **Candidate Inspection**: The app ranks the 3 nearest NWS physical observation stations by Haversine distance.
+- **Primary Station**: Station #1 (closest) provides primary ground metrics (temperature, dew point, relative humidity, barometric pressure).
+- **Consensus / Fallback for Precipitation**: If Station #1 reports dry/cloudy conditions or has an inoperative precipitation sensor (`PNO` remark in raw METAR / null precipitation), the app inspects Stations #2 and #3 within 10 miles. If a neighboring station reports active rain (`weatherCode >= 51` or `precipitation > 0`), the ground condition and precipitation rate upgrade to reflect local rain.
+- **Variable Wind Support**: Stations reporting light variable winds (`VRB` in METAR or speed $\le 6\text{ kt}$ / $3.1\text{ m/s}$) with `windDirection: null` are accepted rather than rejected.
 
 ---
 
@@ -81,7 +89,7 @@ In [`app.js`](../app.js) (`renderHourly`):
 7. **NWS Latest Station Observation API**
    - **URL**: `https://api.weather.gov/stations/{stationId}/observations/latest`
    - **Headers**: `User-Agent: (weather-pwa, contact@example.com)`
-   - **Usage**: Fetches ground station telemetry (dew point, relative humidity, wind speed, gusts, direction, precipitation in last hour, barometric pressure, text description). Rejects observations older than 90 minutes.
+   - **Usage**: Fetches ground station telemetry (dew point, relative humidity, wind speed, gusts, direction, precipitation in last hour, barometric pressure, structured present weather, raw METAR). Rejects observations older than 60 minutes.
 
 ### Search & Geolocation Support APIs
 
@@ -105,12 +113,12 @@ In [`app.js`](../app.js) (`renderHourly`):
 
 2. **Auto-Refresh Logic** ([`app.js`](../app.js) -> `refreshWeatherIfNeeded`):
    - Refreshes trigger when user returns to the app via `visibilitychange` (tab becomes visible), `pageshow`, or `focus`.
-   - Data is only re-fetched if the previous fetch was more than **10 minutes old** (`STALE_MS = 10 * 60 * 1000`).
+   - **In-Tab Periodic Check**: While the tab remains open and visible, a 60-second timer checks whether data is older than **10 minutes** (`STALE_MS = 10 * 60 * 1000`) and silently re-fetches.
+   - Prevents stale conditions on dashboard displays or open desktop/tablet monitors.
 
 ---
 
 ## 5. Precip Rate Update Behavior
 
-- **No Periodic Polling**: The application does not run a continuous background `setInterval` loop while open on screen.
 - **Station Reporting Intervals**: NWS stations typically update `precipitationLastHour` once per hour (around :50–:55 past the hour). Open-Meteo updates current model precipitation in 15-to-60 minute runs.
-- **Update Requirement**: To pull fresh precipitation values after weather conditions change, either return to the app tab after 10 minutes or manually refresh the page.
+- **Update Frequency**: While the app is visible, data automatically re-fetches every 10 minutes. Users can also manually refresh or trigger an update on tab focus.
