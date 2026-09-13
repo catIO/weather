@@ -1014,11 +1014,26 @@ function renderCurrent(data, name) {
   // Update browser tab favicon dynamically to match the current condition emoji
   updateFavicon(icon);
 
-  // Update Live Radar visibility and auto-open if raining
-  const isRaining = precip > 0 || (code >= 51 && code <= 99) || (
-    latestAlerts && latestAlerts.some(a => /rain|flood|storm|thunderstorm|precipitation|shower/i.test(a.event || ''))
-  );
-  updateRadarVisibility(isRaining);
+  // Update Live Radar visibility: strictly for active precipitation or high probability within the next hour
+  const hasActivePrecip = precip > 0 || (code >= 51 && code <= 99) || (latestNWSObservation?.precipitation > 0) || (latestNWSObservation?.weatherCode >= 51 && latestNWSObservation?.weatherCode <= 99);
+
+  let hasImminentPrecip = false;
+  if (data.hourly && data.hourly.time) {
+    const currentHourIdx = findCurrentTimeIndex(data.hourly.time, data.utc_offset_seconds);
+    const nextHours = [currentHourIdx, currentHourIdx + 1].filter(i => i >= 0 && i < data.hourly.time.length);
+    for (const hIdx of nextHours) {
+      const prob = data.hourly.precipitation_probability?.[hIdx] ?? 0;
+      const hPrecip = data.hourly.precipitation?.[hIdx] ?? 0;
+      const hCode = data.hourly.weather_code?.[hIdx] ?? 0;
+      if (prob >= 60 || (prob >= 40 && hPrecip > 0) || (hPrecip >= 0.5) || (prob >= 50 && hCode >= 51 && hCode <= 99)) {
+        hasImminentPrecip = true;
+        break;
+      }
+    }
+  }
+
+  const shouldShowRadar = hasActivePrecip || hasImminentPrecip;
+  updateRadarVisibility(shouldShowRadar);
 
   currentEl.classList.remove('hidden');
 }
@@ -1989,15 +2004,21 @@ function toggleRadarExpand(force) {
   }, 100);
 }
 
-function updateRadarVisibility(isRaining) {
-  if (isRaining) {
+function updateRadarVisibility(shouldShow) {
+  if (shouldShow) {
     radarToggleBtn?.classList.remove('hidden');
     if (!isRadarDismissed && currentLocation) {
       initOrUpdateRadar(currentLocation.lat, currentLocation.lon, currentLocation.name);
     }
   } else {
-    if (radarCardEl?.classList.contains('hidden')) {
-      radarToggleBtn?.classList.add('hidden');
+    stopRadarAnimation();
+    toggleRadarExpand(false);
+    radarCardEl?.classList.add('hidden');
+    radarToggleBtn?.classList.add('hidden');
+    if (radarMap) {
+      radarTileLayers.forEach(f => {
+        if (radarMap.hasLayer(f.layer)) radarMap.removeLayer(f.layer);
+      });
     }
   }
 }
@@ -2137,6 +2158,9 @@ window.addEventListener('pageshow', () => {
 });
 
 window.addEventListener('focus', refreshWeatherIfNeeded);
+window.addEventListener('blur', () => {
+  stopRadarAnimation();
+});
 
 // Periodically check every 60 seconds while open on screen, refreshing if data > 10 min stale
 setInterval(() => {
