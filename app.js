@@ -582,11 +582,11 @@ document.addEventListener('click', (e) => {
 });
 
 // ── Weather fetching ──
-async function fetchWeather(lat, lon, name, { silent = false, force = false } = {}) {
+async function fetchWeather(lat, lon, name, { silent = false, force = false, maxAgeMs = STALE_MS } = {}) {
   // Skip if same location and data is still fresh (avoids duplicate calls)
   if (silent && !force && latestWeatherData && currentLocation &&
     currentLocation.lat === lat && currentLocation.lon === lon &&
-    Date.now() - lastFetchTime < STALE_MS) {
+    Date.now() - lastFetchTime < maxAgeMs) {
     return;
   }
 
@@ -1815,7 +1815,7 @@ let isRadarPlaying = false;
 let isRadarDismissed = false;
 let radarApiData = null;
 let radarApiLastFetch = 0;
-const RADAR_API_TTL = 10 * 60 * 1000;
+const RADAR_API_TTL = 2 * 60 * 1000;
 
 function stopRadarAnimation() {
   if (radarPlayInterval) {
@@ -2127,9 +2127,9 @@ if ('serviceWorker' in navigator) {
 
 // ── Refresh on focus (if data is stale) ──
 let lastFetchTime = 0;
-// Refresh if data is more than 10 minutes old (Open-Meteo updates every 15 min;
-// 10 min balances freshness vs unnecessary requests)
-const STALE_MS = 10 * 60 * 1000;
+// Refresh if data is more than 3 minutes old while viewing, or 1 minute on return/focus
+const STALE_MS = 3 * 60 * 1000;
+const FOCUS_STALE_MS = 60 * 1000;
 
 // Persist lastFetchTime so staleness survives PWA suspend/resume
 try {
@@ -2137,16 +2137,16 @@ try {
   if (stored) lastFetchTime = parseInt(stored, 10) || 0;
 } catch { /* ignore */ }
 
-function refreshWeatherIfNeeded() {
-  if (currentLocation && Date.now() - lastFetchTime > STALE_MS) {
-    fetchWeather(currentLocation.lat, currentLocation.lon, currentLocation.name, { silent: true });
+function refreshWeatherIfNeeded({ maxAgeMs = FOCUS_STALE_MS } = {}) {
+  if (currentLocation && Date.now() - lastFetchTime > maxAgeMs) {
+    fetchWeather(currentLocation.lat, currentLocation.lon, currentLocation.name, { silent: true, force: true, maxAgeMs });
   }
 }
 
-// Refresh when user returns to the page (visibility/focus/pageshow) or periodically while visible
+// Refresh when user returns to the page (visibility/focus/pageshow)
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible') {
-    refreshWeatherIfNeeded();
+    refreshWeatherIfNeeded({ maxAgeMs: FOCUS_STALE_MS });
     if (radarMap) radarMap.invalidateSize();
   } else {
     stopRadarAnimation();
@@ -2154,18 +2154,21 @@ document.addEventListener('visibilitychange', () => {
 });
 
 window.addEventListener('pageshow', () => {
-  refreshWeatherIfNeeded();
+  refreshWeatherIfNeeded({ maxAgeMs: FOCUS_STALE_MS });
 });
 
-window.addEventListener('focus', refreshWeatherIfNeeded);
+window.addEventListener('focus', () => {
+  refreshWeatherIfNeeded({ maxAgeMs: FOCUS_STALE_MS });
+});
+
 window.addEventListener('blur', () => {
   stopRadarAnimation();
 });
 
-// Periodically check every 60 seconds while open on screen, refreshing if data > 10 min stale
+// Periodically check every 60 seconds while open on screen, refreshing if data > 3 min stale
 setInterval(() => {
   if (document.visibilityState === 'visible') {
-    refreshWeatherIfNeeded();
+    refreshWeatherIfNeeded({ maxAgeMs: STALE_MS });
   }
 }, 60 * 1000);
 
