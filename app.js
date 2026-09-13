@@ -1892,6 +1892,8 @@ async function initOrUpdateRadar(lat, lon, locationName) {
         maxZoom: 18
       }).setView([lat, lon], 7);
 
+      radarMap.attributionControl.setPrefix(false);
+
       if (!radarMap.getPane('basemapPane')) {
         radarMap.createPane('basemapPane');
       }
@@ -1903,11 +1905,11 @@ async function initOrUpdateRadar(lat, lon, locationName) {
       radarMap.getPane('radarPane').style.zIndex = '400';
       radarMap.getPane('radarPane').style.pointerEvents = 'none';
 
-      L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      L.tileLayer('https://maps.rainviewer.com/styles/m2_dark/256/{z}/{x}/{y}.png', {
         pane: 'basemapPane',
         minZoom: 3,
         maxZoom: 18,
-        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>'
+        attribution: '&copy; <a href="https://www.rainviewer.com" target="_blank" rel="noopener">RainViewer</a> &middot; &copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>'
       }).addTo(radarMap);
 
       const pinIcon = L.divIcon({
@@ -1991,7 +1993,7 @@ function toggleRadarExpand(force) {
   radarCardEl.classList.toggle('radar-expanded', isRadarExpanded);
   document.body.classList.toggle('radar-modal-open', isRadarExpanded);
   if (expandRadarIcon) {
-    expandRadarIcon.textContent = isRadarExpanded ? 'close_fullscreen' : 'open_in_full';
+    expandRadarIcon.textContent = isRadarExpanded ? 'fullscreen_exit' : 'fullscreen';
   }
   if (expandRadarBtn) {
     const label = isRadarExpanded ? 'Restore view' : 'Enlarge view';
