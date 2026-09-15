@@ -2189,9 +2189,9 @@ window.addEventListener('blur', () => {
   stopRadarAnimation();
 });
 
-// Periodically check every 60 seconds while open on screen, refreshing if data > 3 min stale
+// Periodically check every 60 seconds while open and focused on screen, refreshing if data > 3 min stale
 setInterval(() => {
-  if (document.visibilityState === 'visible') {
+  if (document.visibilityState === 'visible' && document.hasFocus()) {
     refreshWeatherIfNeeded({ maxAgeMs: STALE_MS });
   }
 }, 60 * 1000);

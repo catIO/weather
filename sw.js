@@ -1,10 +1,10 @@
-const CACHE_VERSION = 27; // bump on breaking changes
+const CACHE_VERSION = 28; // bump on breaking changes
 const CACHE_NAME = `weather-v${CACHE_VERSION}`;
 const ASSETS = [
   '/',
   '/index.html',
-  '/styles.css?v=27',
-  '/app.js?v=27',
+  '/styles.css?v=28',
+  '/app.js?v=28',
   '/icons/icon-192.png',
   '/icons/icon-512.png'
 ];

@@ -123,13 +123,13 @@ In [`app.js`](../app.js) (`renderHourly`):
    - When NWS observation completes, re-runs `renderCurrent` to overwrite tiles with live ground-station data.
 
 2. **Auto-Refresh Logic** ([`app.js`](../app.js) -> `refreshWeatherIfNeeded`):
-   - Refreshes trigger when user returns to the app via `visibilitychange` (tab becomes visible), `pageshow`, or `focus`.
-   - **In-Tab Periodic Check**: While the tab remains open and visible, a 60-second timer checks whether data is older than **10 minutes** (`STALE_MS = 10 * 60 * 1000`) and silently re-fetches.
-   - Prevents stale conditions on dashboard displays or open desktop/tablet monitors.
+   - Refreshes trigger when user returns to the app via `visibilitychange` (tab becomes visible), `pageshow`, or `focus` if data is older than 1 minute (`FOCUS_STALE_MS = 60 * 1000`).
+   - **In-Tab Periodic Check**: While the tab/window remains open, visible, and actively focused (`document.hasFocus()`), a 60-second timer checks whether data is older than **3 minutes** (`STALE_MS = 3 * 60 * 1000`) and silently re-fetches. Polling pauses whenever the window is in the background or unfocused to prevent unnecessary API usage.
+   - Prevents stale conditions on active dashboard displays or focused desktop windows.
 
 ---
 
 ## 5. Precip Rate Update Behavior
 
 - **Station Reporting Intervals**: NWS stations typically update `precipitationLastHour` once per hour (around :50–:55 past the hour). Open-Meteo updates current model precipitation in 15-to-60 minute runs.
-- **Update Frequency**: While the app is visible, data automatically re-fetches every 10 minutes. Users can also manually refresh or trigger an update on tab focus.
+- **Update Frequency**: While the app is actively focused, data automatically re-fetches every 3 minutes. Users can also manually refresh or trigger an update on tab/window focus.
