@@ -70,7 +70,7 @@ function getHourlyIcon(code, precipProb, cape) {
 
 // Derive a representative daily icon from hourly data (daytime hours 6am-9pm)
 // instead of using the daily weather_code which picks the single "worst" event.
-function getDailyIcon(data, dayStr) {
+function getDailyIcon(data, dayStr, dailyPoP = null) {
   const hourlyTimes = data.hourly.time;
   const daytimeStart = dayStr + 'T06:00';
   const daytimeEnd = dayStr + 'T21:00';
@@ -115,13 +115,14 @@ function getDailyIcon(data, dayStr) {
 
   // Only count smoky hours if WAQI current confirms poor air (>= 100)
   const waqiGate = (data.aqi?.current?.us_aqi ?? 0) >= 100;
+  const isWetDay = dailyPoP != null && dailyPoP >= 60;
 
   for (const hr of daytimeHours) {
     const { code, precip, cape, aqi, pm2_5 } = hr;
     if ([94, 95, 96, 99].includes(code) || (cape >= 500 && precip >= 40)) {
       thunderHours++;
-    } else if (code >= 51 && precip >= 30) {
-      // Only count as rain if precip probability supports it
+    } else if (code >= 51 && (precip >= 30 || isWetDay)) {
+      // Count as rain if precip probability supports it or if day is an established wet event
       rainHours++;
     } else if (code >= 51 && precip >= 15) {
       // Borderline rain — count as half cloud, half rain
@@ -627,20 +628,18 @@ async function fetchWeather(lat, lon, name, { silent = false, force = false, max
       current: 'temperature_2m,relative_humidity_2m,weather_code,wind_speed_10m,wind_direction_10m,dew_point_2m,uv_index,pressure_msl,wind_gusts_10m,precipitation,cape,cloud_cover',
       hourly: 'temperature_2m,relative_humidity_2m,dew_point_2m,weather_code,wind_speed_10m,wind_direction_10m,precipitation_probability,precipitation,pressure_msl,wind_gusts_10m,cape',
       minutely_15: 'lightning_potential,cape,weather_code',
-      daily: 'weather_code,temperature_2m_max,temperature_2m_min,wind_speed_10m_max,wind_direction_10m_dominant,precipitation_probability_max',
+      daily: 'weather_code,temperature_2m_max,temperature_2m_min,wind_speed_10m_max,wind_direction_10m_dominant,precipitation_probability_max,precipitation_sum,precipitation_hours',
       temperature_unit: tempUnit,
       wind_speed_unit: windUnit,
       precipitation_unit: precipUnit,
+      past_hours: 24,
       forecast_days: 10,
       timezone: 'auto',
     });
 
-    // Use GFS Seamless for US locations (blends 3km HRRR for short-term
-    // with GFS for extended — better convective/precipitation accuracy)
-    const isUS = lat >= 24 && lat <= 50 && lon >= -125 && lon <= -66;
-    if (isUS) {
-      params.append('models', 'ncep_gfs_seamless');
-    }
+    // Open-Meteo defaults to `best_match`, which seamlessly blends high-resolution
+    // regional models (e.g. NOAA 3km HRRR in CONUS) for short-term convective &
+    // precipitation accuracy with global models (GFS/ECMWF) for extended days.
 
     const weatherUrl = `https://api.open-meteo.com/v1/forecast?${params}`;
 
@@ -699,7 +698,8 @@ function deriveCurrentCode(data) {
   const c = data.current;
   let code = c.weather_code;
   const obsPrecip = (obs?.precipitation != null && obs.precipitation > 0) ? obs.precipitation : 0;
-  const precip = (c.precipitation != null && c.precipitation > 0) ? c.precipitation : obsPrecip; // mm or inch depending on unit
+  const modelPrecip = (c.precipitation != null && c.precipitation > 0) ? c.precipitation : 0;
+  const precip = Math.max(modelPrecip, obsPrecip); // mm or inch depending on unit
 
   // --- Priority 0: Active severe WARNING upgrade ---
   // Only active severe WARNINGS (e.g. Severe Thunderstorm Warning, Tornado Warning) force condition upgrades.
@@ -842,9 +842,9 @@ function renderCurrent(data, name) {
   const gusts = c.wind_gusts_10m;
   const isCalm = windSpeed === 0;
   const windDir = c.wind_direction_10m;
-  const precip = (obs?.precipitation != null && obs.precipitation > 0)
-    ? obs.precipitation
-    : (c.precipitation ?? 0);
+  const obsPrecip = (obs?.precipitation != null && obs.precipitation > 0) ? obs.precipitation : 0;
+  const modelPrecip = (c.precipitation != null && c.precipitation > 0) ? c.precipitation : 0;
+  const precip = Math.max(obsPrecip, modelPrecip);
 
   // Description comes from deriveCurrentCode (Open-Meteo model), not NWS text
 
@@ -956,23 +956,79 @@ function renderCurrent(data, name) {
     aqiTile.classList.remove('elevated', 'elevated-severe');
   }
 
-  // Precip Rate
-  const precipUnitLabel = settings.precipUnit === 'inch' ? 'in/hr' : 'mm/hr';
-  $('precipRate').textContent = precip > 0 ? `${precip.toFixed(2)} ${precipUnitLabel}` : 'None';
+  // ── Precipitation Card: 24h Accumulation & Next 24h Outlook ──
+  const isInch = settings.precipUnit === 'inch';
+  const hourlyTimes = data.hourly?.time ?? [];
+  const hourlyPrecip = data.hourly?.precipitation ?? [];
+  const offset = data.utc_offset_seconds ?? 0;
+  const currentHourIdx = findCurrentTimeIndex(hourlyTimes, offset, now);
+
+  let past24hAccum = 0;
+  let next24hExpected = 0;
+
+  if (hourlyTimes.length && hourlyPrecip.length && currentHourIdx >= 0) {
+    const startPastIdx = Math.max(0, currentHourIdx - 24);
+    for (let h = startPastIdx; h < currentHourIdx; h++) {
+      past24hAccum += (hourlyPrecip[h] ?? 0);
+    }
+    // Include current hour's precipitation
+    const currentModelHr = hourlyPrecip[currentHourIdx] ?? 0;
+    const currentObsHr = obs?.precipitation != null && obs.precipitation > 0 ? obs.precipitation : 0;
+    past24hAccum += Math.max(currentModelHr, currentObsHr);
+
+    const endNextIdx = Math.min(hourlyTimes.length, currentHourIdx + 24);
+    for (let h = currentHourIdx; h < endNextIdx; h++) {
+      next24hExpected += (hourlyPrecip[h] ?? 0);
+    }
+  }
+
+  // Format strings
+  const past24hStr = isInch ? `${past24hAccum.toFixed(2)}″` : `${Math.round(past24hAccum * 10) / 10} mm`;
+  const next24hStr = isInch ? `${next24hExpected.toFixed(2)}″` : `${Math.round(next24hExpected * 10) / 10} mm`;
+  const precipUnitRateLabel = isInch ? 'in/hr' : 'mm/hr';
+
+  const isPrecipEvent = past24hAccum >= 0.005 || next24hExpected >= 0.005 || precip > 0 || (code >= 51 && code <= 99);
+  const pastTile = $('precipTile');
+  const forecastTile = $('precipForecastTile');
+  const uvTile = $('uvTile') || $('uvIndex')?.closest('.detail');
+
+  if (isPrecipEvent) {
+    // Show dual precip cards side-by-side; hide UV Index (irrelevant during rain/storms)
+    forecastTile?.classList.remove('hidden');
+    uvTile?.classList.add('hidden');
+
+    if ($('precipPast24h')) $('precipPast24h').textContent = past24hStr;
+    if ($('precipPastLabel')) $('precipPastLabel').textContent = 'in last 24h';
+    if ($('precipExpected')) $('precipExpected').textContent = next24hStr;
+    if ($('precipExpectedLabel')) $('precipExpectedLabel').textContent = 'in next 24h';
+  } else {
+    // Dry weather: hide secondary forecast card, show UV index
+    forecastTile?.classList.add('hidden');
+    uvTile?.classList.remove('hidden');
+
+    if ($('precipPast24h')) $('precipPast24h').textContent = 'None';
+    if ($('precipPastLabel')) $('precipPastLabel').textContent = 'in last 24h';
+  }
+
+
+  // Fallback for legacy precipRate element if still referenced
+  if ($('precipRate')) {
+    $('precipRate').textContent = precip > 0 ? `${precip.toFixed(2)} ${precipUnitRateLabel}` : 'None';
+  }
 
   // CAPE (from current, or nearest minutely_15 or hourly)
   let capeVal = data.current?.cape ?? null;
   if (capeVal == null) {
-    const offset = data.utc_offset_seconds ?? 0;
+    const offsetCape = data.utc_offset_seconds ?? 0;
     const now2 = new Date();
     const m15T = data.minutely_15?.time ?? [];
     const m15C = data.minutely_15?.cape ?? [];
-    let capeIdx = findCurrentTimeIndex(m15T, offset, now2);
+    let capeIdx = findCurrentTimeIndex(m15T, offsetCape, now2);
     capeVal = m15C[capeIdx] ?? null;
     if (capeVal == null) {
       const hT = data.hourly?.time ?? [];
       const hC = data.hourly?.cape ?? [];
-      let hIdx = findCurrentTimeIndex(hT, offset, now2);
+      let hIdx = findCurrentTimeIndex(hT, offsetCape, now2);
       capeVal = hC[hIdx] ?? 0;
     }
   }
@@ -990,16 +1046,28 @@ function renderCurrent(data, name) {
 
   // UV tile
   const uvVal = c.uv_index ?? 0;
-  const uvTile = $('uvIndex').closest('.detail');
-  uvTile.classList.toggle('elevated-severe', uvVal >= 8);
-  uvTile.classList.toggle('elevated', uvVal >= 6 && uvVal < 8);
+  if (uvTile) {
+    uvTile.classList.toggle('elevated-severe', uvVal >= 8);
+    uvTile.classList.toggle('elevated', uvVal >= 6 && uvVal < 8);
+  }
 
-  // Precip tile
-  const precipTile = $('precipRate').closest('.detail');
-  const heavyPrecip = settings.precipUnit === 'inch' ? 0.3 : 7.6;
-  const modPrecip = settings.precipUnit === 'inch' ? 0.1 : 2.5;
-  precipTile.classList.toggle('elevated-severe', precip >= heavyPrecip);
-  precipTile.classList.toggle('elevated', precip >= modPrecip && precip < heavyPrecip);
+  // Precip tiles elevation based on 24h accumulation or active rate
+  const heavyThreshold = isInch ? 0.75 : 20; // 0.75 in or 20 mm in 24h
+  const modThreshold = isInch ? 0.25 : 6.5;   // 0.25 in or 6.5 mm in 24h
+
+  if (pastTile) {
+    const isHeavyPast = past24hAccum >= heavyThreshold;
+    const isModPast = past24hAccum >= modThreshold;
+    pastTile.classList.toggle('elevated-severe', isHeavyPast);
+    pastTile.classList.toggle('elevated', isModPast && !isHeavyPast);
+  }
+
+  if (forecastTile) {
+    const isHeavyFuture = next24hExpected >= heavyThreshold || precip >= (isInch ? 0.3 : 7.6);
+    const isModFuture = next24hExpected >= modThreshold || precip >= (isInch ? 0.1 : 2.5);
+    forecastTile.classList.toggle('elevated-severe', isHeavyFuture);
+    forecastTile.classList.toggle('elevated', isModFuture && !isHeavyFuture);
+  }
 
   // CAPE tile
   const capeTile = $('cape').closest('.detail');
@@ -1249,10 +1317,22 @@ function parseNWSObservationCode(p) {
 
   // 3. Positive precipitation rate (takes precedence over generic dry/cloudy text <= 3)
   let precipCode = null;
+  let measuredMm = null;
   if (p.precipitationLastHour?.value != null && p.precipitationLastHour.value > 0.00005) {
-    const mm = p.precipitationLastHour.value * 1000;
-    if (mm >= 7.6) precipCode = 65;
-    else if (mm >= 2.5) precipCode = 63;
+    const unit = p.precipitationLastHour.unitCode || '';
+    if (unit.includes('in')) measuredMm = p.precipitationLastHour.value * 25.4;
+    else if (unit.includes('mm')) measuredMm = p.precipitationLastHour.value;
+    else measuredMm = p.precipitationLastHour.value * 1000; // NWS meters to mm
+  } else if (raw) {
+    const pMatch = raw.match(/\bP(\d{4})\b/);
+    if (pMatch) {
+      measuredMm = (parseInt(pMatch[1], 10) / 100) * 25.4;
+    }
+  }
+
+  if (measuredMm != null && measuredMm > 0.1) {
+    if (measuredMm >= 7.6) precipCode = 65;
+    else if (measuredMm >= 2.5) precipCode = 63;
     else precipCode = 61;
   }
 
@@ -1313,15 +1393,36 @@ function parseNWSValue(property, targetUnit) {
   return val;
 }
 
-function parseNWSPrecip(property) {
-  if (!property || property.value == null) return null;
-  const val = property.value;
-  const unit = property.unitCode || '';
-  // NWS typically returns 'wmoUnit:mm' (millimeters). If explicitly meters ('wmoUnit:m' and not mm), convert.
-  let valMm = val;
-  if (unit.includes('wmoUnit:m') && !unit.includes('mm')) {
-    valMm = val * 1000;
+function parseNWSPrecip(property, rawMessage = '') {
+  let valMm = null;
+
+  if (property && property.value != null) {
+    const val = property.value;
+    const unit = property.unitCode || '';
+
+    if (unit.includes('in')) {
+      valMm = val * 25.4;
+    } else if (unit.includes('mm')) {
+      valMm = val;
+    } else if (unit.includes(':m') || unit.includes('meter') || val < 0.5) {
+      // NWS returns 'unit:m' or 'wmoUnit:m' (meters). Convert meters to millimeters.
+      valMm = val * 1000;
+    } else {
+      valMm = val;
+    }
   }
+
+  // Fallback to METAR Pxxxx group (hourly precip in hundredths of an inch, e.g. P0018 = 0.18 in)
+  if ((valMm == null || valMm === 0) && rawMessage) {
+    const pMatch = rawMessage.match(/\bP(\d{4})\b/);
+    if (pMatch) {
+      const hundredths = parseInt(pMatch[1], 10);
+      valMm = (hundredths / 100) * 25.4;
+    }
+  }
+
+  if (valMm == null) return null;
+
   if (settings.precipUnit === 'inch') {
     return valMm * 0.0393701; // mm to inches
   }
@@ -1437,7 +1538,7 @@ async function fetchNWSObservation(lat, lon) {
           ? null
           : p.windDirection.value;
 
-        const parsedPrecip = parseNWSPrecip(p.precipitationLastHour);
+        const parsedPrecip = parseNWSPrecip(p.precipitationLastHour, p.rawMessage);
         const parsedCode = parseNWSObservationCode(p);
         const hasPNO = /PNO|P\$/i.test(p.rawMessage || '');
 
@@ -1519,12 +1620,23 @@ function renderHourly(data) {
   const waqiCurrent = data.aqi?.current?.us_aqi;
   const showHourlyAqi = waqiCurrent >= 100;
 
+  const currentCode = deriveCurrentCode(data, latestNWSObservation);
+  const isCurrentlyRaining = (
+    (latestNWSObservation?.precipitation != null && latestNWSObservation.precipitation > 0) ||
+    (latestNWSObservation?.weatherCode >= 51 && latestNWSObservation?.weatherCode <= 99) ||
+    (data.current?.precipitation != null && data.current.precipitation > 0) ||
+    ([51, 53, 55, 56, 57, 61, 63, 65, 66, 67, 71, 73, 75, 77, 80, 81, 82, 85, 86, 95, 96, 99].includes(currentCode))
+  );
+
   // Show next 24 hours
   const count = Math.min(24, times.length - startIdx);
   for (let i = 0; i < count; i++) {
     const idx = startIdx + i;
     const dt = new Date(times[idx]);
-    const precip = data.hourly.precipitation_probability[idx] ?? 0;
+    let precip = data.hourly.precipitation_probability[idx] ?? 0;
+    if (i === 0 && isCurrentlyRaining) {
+      precip = Math.max(precip, 100);
+    }
     const cape = data.hourly.cape?.[idx] ?? 0;
     const code = data.hourly.weather_code[idx];
 
@@ -1541,6 +1653,9 @@ function renderHourly(data) {
     }
 
     let icon = getHourlyIcon(code, precip, cape);
+    if (i === 0 && isCurrentlyRaining && ['☀️', '🌤️', '⛅', '☁️'].includes(icon)) {
+      icon = weatherInfo(currentCode)[0];
+    }
     const isRainOrStormIcon = ['⛈️', '🌧️', '🌦️', '🌨️'].includes(icon);
     if (hourlyAqi != null && (hourlyAqi >= 100 || hourlyPm25 >= 35) && [0, 1, 2, 3, 45, 48].includes(code) && !isRainOrStormIcon) {
       icon = '😶‍🌫️';
@@ -1582,6 +1697,88 @@ function renderHourly(data) {
   hourlyEl.classList.remove('hidden');
 }
 
+/**
+ * Calculates a meteorologically accurate daily probability of precipitation (PoP).
+ *
+ * Open-Meteo's `precipitation_probability_max` is only the peak single-hour probability,
+ * which significantly underestimates multi-hour and synoptic rain events (e.g., Nor'easters
+ * where every hour has 50% chance, yielding ~100% odds of measurable rain across the day).
+ *
+ * This function computes:
+ * 1. An autocorrelated event probability using 4-hour decorrelation blocks across the day.
+ * 2. An empirical confidence floor based on expected precipitation accumulation (precipitation_sum)
+ *    and precipitation duration (precipitation_hours).
+ * 3. Ground observation truth: if it is today and active rain is verified right now, PoP is 100%.
+ */
+function calculateDailyPoP(data, dayIdx, dayStr, isTodayRaining = false) {
+  if (dayIdx === 0 && isTodayRaining) {
+    return 100;
+  }
+
+  const pMax = data.daily?.precipitation_probability_max?.[dayIdx] ?? 0;
+  const pSum = data.daily?.precipitation_sum?.[dayIdx] ?? 0;
+  const pHours = data.daily?.precipitation_hours?.[dayIdx] ?? 0;
+
+  // Convert sum to mm for standard thresholding (Open-Meteo returns in requested precipUnit)
+  const isInch = settings.precipUnit === 'inch';
+  const sumMm = isInch ? pSum * 25.4 : pSum;
+
+  const hourlyTimes = data.hourly?.time || [];
+  const hourlyProbs = data.hourly?.precipitation_probability || [];
+  const dayStart = dayStr + 'T00:00';
+  const dayEnd = dayStr + 'T23:00';
+
+  // Group into 6 x 4-hour blocks: [0-3], [4-7], [8-11], [12-15], [16-19], [20-23]
+  const blocks = [0, 0, 0, 0, 0, 0];
+  let hoursFound = 0;
+
+  for (let h = 0; h < hourlyTimes.length; h++) {
+    const t = hourlyTimes[h];
+    if (t >= dayStart && t <= dayEnd) {
+      hoursFound++;
+      const hourNum = parseInt(t.slice(11, 13), 10);
+      const blockIdx = Math.min(5, Math.floor(hourNum / 4));
+      const prob = hourlyProbs[h] ?? 0;
+      if (prob > blocks[blockIdx]) {
+        blocks[blockIdx] = prob;
+      }
+    }
+  }
+
+  // If no hourly data for this day, fallback to pMax or volume thresholds
+  let blockProb = pMax;
+  if (hoursFound > 0) {
+    // Cumulative probability across 4-hour decorrelated blocks: 1 - Prod(1 - P_k)
+    let noRainProb = 1.0;
+    for (let k = 0; k < 6; k++) {
+      noRainProb *= (1 - (blocks[k] / 100));
+    }
+    blockProb = (1 - noRainProb) * 100;
+  }
+
+  // Volume & duration confidence floors
+  let volumeFloor = 0;
+  if (sumMm >= 10) volumeFloor = 95;       // >= ~0.40 in: virtually guaranteed rain
+  else if (sumMm >= 5) volumeFloor = 90;  // >= ~0.20 in: high confidence
+  else if (sumMm >= 2.5) volumeFloor = 80;// >= ~0.10 in: steady rain expected
+  else if (sumMm >= 1.0) volumeFloor = 65;// >= ~0.04 in: measurable rain expected
+  else if (sumMm > 0.2) volumeFloor = 40;
+
+  let durationFloor = 0;
+  if (pHours >= 8) durationFloor = 90;
+  else if (pHours >= 5) durationFloor = 80;
+  else if (pHours >= 3) durationFloor = 65;
+
+  let dailyProb = Math.max(blockProb, volumeFloor, durationFloor, pMax);
+
+  // If literally no rain is projected anywhere in the day
+  if (pMax === 0 && pSum === 0 && pHours === 0) {
+    dailyProb = 0;
+  }
+
+  return Math.min(100, Math.max(0, Math.round(dailyProb)));
+}
+
 function renderDaily(data) {
   const list = $('dailyList');
 
@@ -1593,13 +1790,22 @@ function renderDaily(data) {
     expandedIdx = Array.from(list.children).indexOf(wrapper);
   }
 
+  const currentCode = deriveCurrentCode(data, latestNWSObservation);
+  const isTodayRaining = (
+    (latestNWSObservation?.precipitation != null && latestNWSObservation.precipitation > 0) ||
+    (latestNWSObservation?.weatherCode >= 51 && latestNWSObservation?.weatherCode <= 99) ||
+    (data.current?.precipitation != null && data.current.precipitation > 0) ||
+    ([51, 53, 55, 56, 57, 61, 63, 65, 66, 67, 71, 73, 75, 77, 80, 81, 82, 85, 86, 95, 96, 99].includes(currentCode))
+  );
+
   const fragment = document.createDocumentFragment();
   const days = data.daily.time;
   const hourlyTimes = data.hourly.time;
 
   for (let i = 0; i < days.length; i++) {
     const dt = new Date(days[i] + 'T00:00:00');
-    const icon = getDailyIcon(data, days[i]);
+    const dPrecip = calculateDailyPoP(data, i, days[i], isTodayRaining);
+    const icon = getDailyIcon(data, days[i], dPrecip);
     const high = Math.round(data.daily.temperature_2m_max[i]);
     const low = Math.round(data.daily.temperature_2m_min[i]);
     const dWind = Math.round(data.daily.wind_speed_10m_max[i]);
@@ -1617,7 +1823,6 @@ function renderDaily(data) {
       }
     }
     const dDir = windDirection(peakWindDir);
-    const dPrecip = data.daily.precipitation_probability_max[i] ?? 0;
 
     const dayName = i === 0
       ? 'Today'
@@ -1699,11 +1904,24 @@ function renderDayHourly(container, data, dayStr) {
 
   const waqiCurrent = data.aqi?.current?.us_aqi;
   const showHourlyAqi = waqiCurrent >= 100;
+  const offset = data.utc_offset_seconds ?? 0;
+  const now = new Date();
+  const currentHourIdx = findCurrentTimeIndex(times, offset, now);
+  const currentCode = deriveCurrentCode(data, latestNWSObservation);
+  const isCurrentlyRaining = (
+    (latestNWSObservation?.precipitation != null && latestNWSObservation.precipitation > 0) ||
+    (latestNWSObservation?.weatherCode >= 51 && latestNWSObservation?.weatherCode <= 99) ||
+    (data.current?.precipitation != null && data.current.precipitation > 0) ||
+    ([51, 53, 55, 56, 57, 61, 63, 65, 66, 67, 71, 73, 75, 77, 80, 81, 82, 85, 86, 95, 96, 99].includes(currentCode))
+  );
 
   for (let idx = 0; idx < times.length; idx++) {
     if (times[idx] < dayStart || times[idx] > dayEnd) continue;
     const dt = new Date(times[idx]);
-    const precip = data.hourly.precipitation_probability[idx] ?? 0;
+    let precip = data.hourly.precipitation_probability[idx] ?? 0;
+    if (idx === currentHourIdx && isCurrentlyRaining) {
+      precip = Math.max(precip, 100);
+    }
     const cape = data.hourly.cape?.[idx] ?? 0;
     const code = data.hourly.weather_code[idx];
 
@@ -1720,6 +1938,9 @@ function renderDayHourly(container, data, dayStr) {
     }
 
     let icon = getHourlyIcon(code, precip, cape);
+    if (idx === currentHourIdx && isCurrentlyRaining && ['☀️', '🌤️', '⛅', '☁️'].includes(icon)) {
+      icon = weatherInfo(currentCode)[0];
+    }
     const isRainOrStormIcon = ['⛈️', '🌧️', '🌦️', '🌨️'].includes(icon);
     if (hourlyAqi != null && (hourlyAqi >= 100 || hourlyPm25 >= 35) && [0, 1, 2, 3, 45, 48].includes(code) && !isRainOrStormIcon) {
       icon = '😶‍🌫️';

@@ -14,11 +14,11 @@ In [`app.js`](../app.js) (`renderCurrent`), metric tiles prioritize **NWS Ground
 | **Humidity** | NWS Observation (`relativeHumidity`) | Open-Meteo `data.current.relative_humidity_2m` | Relative humidity (%) |
 | **Wind Speed & Gusts** | NWS Observation (`windSpeed`, `windGust`) | Open-Meteo `data.current.wind_speed_10m`, `wind_gusts_10m` | Sustained 10m wind speed & peak 3s gust speed |
 | **Wind Direction** | NWS Observation (`windDirection` when not calm) | Open-Meteo `data.current.wind_direction_10m` | Direction wind originates from (deg/cardinal) |
-| **Precip Rate** | NWS Observation (`precipitationLastHour`) | Open-Meteo `data.current.precipitation` | Current precipitation rate (`in/hr` or `mm/hr`) |
-| **CAPE** | Open-Meteo `data.current.cape` | Open-Meteo `minutely_15.cape` / `hourly.cape` | Convective Available Potential Energy ($J/kg$) |
+| **Precipitation** | Open-Meteo `data.hourly.precipitation` & NWS | NWS `precipitationLastHour` / METAR `Pxxxx` | Past 24h liquid accumulation recorded at ground stations and model |
+| **Expected Rain** | Open-Meteo `data.hourly.precipitation` | Open-Meteo model forecast | Next 24h expected accumulation, live active rain rate (`in/hr` or `mm/hr`), and Live Radar button; displayed in place of UV Index during precip events |
+| **UV Index** | Open-Meteo `data.current.uv_index` | N/A | Erythemal UV index; automatically hidden in favor of Expected Rain during precipitation events |
 | **Pressure** | NWS Observation (`barometricPressure`) | Open-Meteo `data.current.pressure_msl` | Sea-level pressure (`inHg` or `hPa`) |
-| **Pressure Trend** | Derived calculation | Open-Meteo `data.hourly.pressure_msl` | Compares current pressure against 3 hours prior |
-| **UV Index** | Open-Meteo `data.current.uv_index` | N/A | Erythemal UV index |
+| **CAPE** | Open-Meteo `data.current.cape` | Open-Meteo `minutely_15.cape` / `hourly.cape` | Convective Available Potential Energy ($J/kg$) |
 | **Air Quality** | WAQI Proxy (`/api/air-quality`) | Open-Meteo Air Quality API (`data.aqi.current.us_aqi`) | Rendered when AQI $\ge 100$ or active AQ alert |
 
 
@@ -40,12 +40,20 @@ Condition text and icons are derived in `deriveCurrentCode` using a hybrid model
 
 ---
 
-## 2. Hourly Forecast Data
+## 2. Hourly & Daily Forecast Data
 
-In [`app.js`](../app.js) (`renderHourly`):
+In [`app.js`](../app.js):
 
 - **Weather Metrics** (Hour, Icon, Temp, Precip Probability %, Wind Speed & Direction): Pulled from **Open-Meteo Forecast API** (`data.hourly` fields: `temperature_2m`, `weather_code`, `wind_speed_10m`, `wind_direction_10m`, `precipitation_probability`, `cape`).
+- **Live Ground-Truth Nowcasting (`renderHourly`)**: When active precipitation is confirmed by physical NWS ground station telemetry (`obs.precipitation > 0`, rain/storm codes) or current conditions, the "Now" hour probability is set to 100% and icon synced to prevent false dry/sunny indicators during active rain.
 - **Hourly Air Quality Badges**: Rendered when current AQI $\ge 100$, pulled from **Open-Meteo Air Quality API** (`data.aqi.hourly` fields: `us_aqi`, `pm2_5`).
+
+### 2.1 Daily Probability of Precipitation (PoP) Calculation
+
+Open-Meteo's native `precipitation_probability_max` only returns the single highest hourly probability of the day, causing multi-hour storms (e.g. Nor'easters) with 50% hourly probabilities across the day to falsely appear as a 50% daily chance. In `calculateDailyPoP`:
+1. **Autocorrelated Event Probability**: Groups the 24 hours into 4-hour decorrelation blocks, computing cumulative event probability ($1 - \prod (1 - P_{\text{block}})$).
+2. **Precipitation Volume & Duration Floors**: Evaluates daily `precipitation_sum` and `precipitation_hours`. Days with steady accumulation ($\ge 0.10\text{ in}$ / $2.5\text{ mm}$) or extended duration ($\ge 5\text{ hrs}$) establish high confidence floors ($80\%\text{–}95\%$).
+3. **Current-Day Ground Verification**: If ground stations or current conditions confirm active precipitation today, today's daily PoP is 100%.
 
 ---
 
@@ -55,7 +63,8 @@ In [`app.js`](../app.js) (`renderHourly`):
 
 1. **Open-Meteo Forecast API**
    - **URL**: `https://api.open-meteo.com/v1/forecast`
-   - **Parameters**: `latitude`, `longitude`, `current` (`temperature_2m,relative_humidity_2m,weather_code,wind_speed_10m,wind_direction_10m,dew_point_2m,uv_index,pressure_msl,wind_gusts_10m,precipitation,cape`), `hourly` (`temperature_2m,weather_code,wind_speed_10m,wind_direction_10m,precipitation_probability,pressure_msl,wind_gusts_10m,cape`), `minutely_15` (`lightning_potential,cape,weather_code`), `daily` (`weather_code,temperature_2m_max,temperature_2m_min,wind_speed_10m_max,wind_direction_10m_dominant,precipitation_probability_max`), `temperature_unit`, `wind_speed_unit`, `precipitation_unit`, `forecast_days=10`, `timezone=auto`
+   - **Parameters**: `latitude`, `longitude`, `current` (`temperature_2m,relative_humidity_2m,weather_code,wind_speed_10m,wind_direction_10m,dew_point_2m,uv_index,pressure_msl,wind_gusts_10m,precipitation,cape,cloud_cover`), `hourly` (`temperature_2m,relative_humidity_2m,dew_point_2m,weather_code,wind_speed_10m,wind_direction_10m,precipitation_probability,precipitation,pressure_msl,wind_gusts_10m,cape`), `minutely_15` (`lightning_potential,cape,weather_code`), `daily` (`weather_code,temperature_2m_max,temperature_2m_min,wind_speed_10m_max,wind_direction_10m_dominant,precipitation_probability_max,precipitation_sum,precipitation_hours`), `past_hours=24`, `temperature_unit`, `wind_speed_unit`, `precipitation_unit`, `forecast_days=10`, `timezone=auto`
+   - **Model Strategy**: Uses Open-Meteo `best_match`, dynamically blending high-resolution regional models (e.g. NOAA 3km HRRR in CONUS) for short-term convective & precipitation accuracy with global models (GFS/ECMWF) for extended days.
    - **Usage**: Primary numerical weather prediction model data for current conditions, minutely_15 storm windowing, hourly forecast, and 10-day daily forecast.
 
 2. **Open-Meteo Air Quality API**

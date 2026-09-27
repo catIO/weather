@@ -398,7 +398,8 @@ header {
   text-align: center;
   border: 1px solid transparent;
   transition: border-color 0.3s;
-  height: 90px;
+  min-height: 90px;
+  height: auto;
   display: flex;
   flex-direction: column;
   justify-content: center;
@@ -1001,34 +1002,16 @@ header {
 
 .precip-detail {
   position: relative;
+  padding: 8px 10px;
 }
 
-.radar-toggle-btn {
-  background: rgba(79, 195, 247, 0.12);
-  border: 1px solid rgba(79, 195, 247, 0.35);
-  color: var(--accent);
-  padding: 2px 7px;
-  border-radius: 6px;
-  font-size: 10px;
-  font-weight: 500;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 3px;
-  cursor: pointer;
+.precip-sub {
+  font-size: 13px;
+  color: var(--text-muted);
+  font-weight: 400;
   margin-top: 4px;
-  align-self: center;
-  transition: all 0.2s ease;
 }
 
-.radar-toggle-btn:hover {
-  background: rgba(79, 195, 247, 0.24);
-  border-color: var(--accent);
-}
-
-.radar-toggle-btn .material-icons {
-  font-size: 12px;
-}
 
 /* ── Live Rain Radar Card ── */
 .radar-card {

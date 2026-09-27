@@ -158,28 +158,32 @@
             <span class="detail-label">Wind Direction</span>
             <span id="windDir" class="detail-value"></span>
           </div>
-          <div class="detail precip-detail"
-            title="Instantaneous precipitation intensity (liquid equivalent). Light: <2.5 mm/hr, Moderate: 2.5–7.6 mm/hr, Heavy: >7.6 mm/hr. Derived from radar reflectivity and numerical weather prediction models.">
-            <span class="detail-label">Precip Rate</span>
-            <span id="precipRate" class="detail-value"></span>
-            <button id="radarToggleBtn" class="radar-toggle-btn hidden" aria-label="View live radar map" title="View Live Radar">
-              Live Radar
-            </button>
+          <div class="detail precip-detail" id="precipTile"
+            title="Total precipitation accumulation recorded over the past 24 hours from NWS physical ground stations and high-resolution model data.">
+            <span class="detail-label">Precipitation</span>
+            <span id="precipPast24h" class="detail-value">0.00″</span>
+            <span id="precipPastLabel" class="precip-sub">in last 24h</span>
           </div>
-          <div class="detail"
-            title="Convective Available Potential Energy (J/kg) — the vertically integrated positive buoyancy of an adiabatically lifted parcel. Quantifies maximum possible updraft kinetic energy. >500: marginal instability, >1000: moderate, >2500: extreme. Primary predictor of convective intensity.">
-            <span class="detail-label">CAPE</span>
-            <span id="cape" class="detail-value"></span>
+          <div class="detail precip-detail hidden" id="precipForecastTile"
+            title="Expected precipitation accumulation over the next 24 hours.">
+            <span class="detail-label">Expected Rain</span>
+            <span id="precipExpected" class="detail-value">0.00″</span>
+            <span id="precipExpectedLabel" class="precip-sub">in next 24h</span>
           </div>
-          <div class="detail"
+          <div class="detail" id="uvTile"
+            title="Clear-sky UV Index — erythemal irradiance weighted by the CIE action spectrum, normalized to 25 mW/m². Accounts for solar zenith angle, total column ozone, and altitude. Scale: 1–2 Low, 3–5 Moderate, 6–7 High, 8–10 Very High, 11+ Extreme.">
+            <span class="detail-label">UV Index</span>
+            <span id="uvIndex" class="detail-value"></span>
+          </div>
+          <div class="detail" id="pressureTile"
             title="Mean sea-level pressure (QNH reduced to MSL using ICAO standard atmosphere). Pressure tendency over 3 hours indicates synoptic-scale forcing: rapid falls (>2 hPa/3hr) suggest approaching cyclonic systems or frontal passages.">
             <span class="detail-label">Pressure</span>
             <span id="pressure" class="detail-value"></span>
           </div>
-          <div class="detail"
-            title="Clear-sky UV Index — erythemal irradiance weighted by the CIE action spectrum, normalized to 25 mW/m². Accounts for solar zenith angle, total column ozone, and altitude. Scale: 1–2 Low, 3–5 Moderate, 6–7 High, 8–10 Very High, 11+ Extreme.">
-            <span class="detail-label">UV Index</span>
-            <span id="uvIndex" class="detail-value"></span>
+          <div class="detail" id="capeTile"
+            title="Convective Available Potential Energy (J/kg) — the vertically integrated positive buoyancy of an adiabatically lifted parcel. Quantifies maximum possible updraft kinetic energy. >500: marginal instability, >1000: moderate, >2500: extreme. Primary predictor of convective intensity.">
+            <span class="detail-label">CAPE</span>
+            <span id="cape" class="detail-value"></span>
           </div>
           <div class="detail hidden"
             title="U.S. Air Quality Index (AQI) calculated from PM2.5 and PM10 concentrations. 0–50: Good, 51–100: Moderate, 101–150: Unhealthy for Sensitive Groups, 151–200: Unhealthy, 201–300: Very Unhealthy, 301+: Hazardous.">
