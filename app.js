@@ -229,6 +229,10 @@ const radarPlayIcon = $('radarPlayIcon');
 const radarScrubber = $('radarScrubber');
 const radarTimeLabel = $('radarTimeLabel');
 const radarFrameLabel = $('radarFrameLabel');
+const radarCompactTimeLabel = $('radarCompactTimeLabel');
+const radarCompactFrameLabel = $('radarCompactFrameLabel');
+const radarTimelineTicks = $('radarTimelineTicks');
+const radarRangeBtns = document.querySelectorAll('.radar-range-btn');
 let latestWeatherData = null;
 let latestAlerts = [];
 let latestNWSObservation = null;
@@ -2029,7 +2033,9 @@ function loadLeaflet() {
 
 let radarMap = null;
 let radarMarker = null;
-let radarTileLayers = []; // array of { time, path, layer }
+let radarAllFrames = []; // array of { time, path, layer, isForecast }
+let radarTileLayers = []; // active slice of frames for current range
+let radarRangeMode = '2h'; // '1h' | '2h'
 let currentRadarIndex = 0;
 let radarPlayInterval = null;
 let isRadarPlaying = false;
@@ -2062,6 +2068,90 @@ function startRadarAnimation() {
   }, 750);
 }
 
+function renderRadarTicks() {
+  if (!radarTimelineTicks) return;
+  radarTimelineTicks.innerHTML = '';
+  const total = radarTileLayers.length;
+  if (!total) return;
+
+  const targetCount = Math.min(5, total);
+  const indices = [];
+  if (targetCount === 1) {
+    indices.push(0);
+  } else {
+    for (let i = 0; i < targetCount; i++) {
+      const idx = Math.round((i * (total - 1)) / (targetCount - 1));
+      if (!indices.includes(idx)) indices.push(idx);
+    }
+  }
+
+  // Find the latest non-forecast frame to label as "Now"
+  let nowIdx = -1;
+  for (let i = total - 1; i >= 0; i--) {
+    if (!radarTileLayers[i].isForecast) {
+      nowIdx = i;
+      break;
+    }
+  }
+
+  indices.forEach((frameIdx) => {
+    const frame = radarTileLayers[frameIdx];
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'radar-tick-btn';
+    if (frameIdx === nowIdx) {
+      btn.textContent = 'Now';
+      btn.classList.add('is-now');
+    } else {
+      const d = new Date(frame.time * 1000);
+      const mins = d.getMinutes();
+      btn.textContent = mins === 0
+        ? d.toLocaleTimeString('en-US', { hour: 'numeric' })
+        : d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+    }
+    btn.addEventListener('click', () => {
+      stopRadarAnimation();
+      showRadarFrame(frameIdx);
+    });
+    radarTimelineTicks.appendChild(btn);
+  });
+}
+
+function applyRadarRange(range) {
+  radarRangeMode = range;
+  radarRangeBtns.forEach((btn) => {
+    const isActive = btn.dataset.range === range;
+    btn.classList.toggle('active', isActive);
+    btn.setAttribute('aria-pressed', String(isActive));
+  });
+
+  if (!radarAllFrames.length) return;
+
+  // Hide any currently visible layers from previous slice
+  radarTileLayers.forEach((f) => {
+    if (radarMap && radarMap.hasLayer(f.layer)) {
+      f.layer.setOpacity(0);
+    }
+  });
+
+  if (range === '1h') {
+    const cutoff = (radarAllFrames[radarAllFrames.length - 1].time) - 3600;
+    const sliced = radarAllFrames.filter(f => f.time >= cutoff);
+    radarTileLayers = sliced.length >= 2 ? sliced : radarAllFrames.slice(-7);
+  } else {
+    radarTileLayers = radarAllFrames.slice();
+  }
+
+  if (radarScrubber) {
+    radarScrubber.min = '0';
+    radarScrubber.max = String(Math.max(0, radarTileLayers.length - 1));
+    radarScrubber.value = String(Math.max(0, radarTileLayers.length - 1));
+  }
+
+  renderRadarTicks();
+  showRadarFrame(radarTileLayers.length - 1);
+}
+
 function showRadarFrame(index) {
   if (!radarTileLayers.length || index < 0 || index >= radarTileLayers.length) return;
   currentRadarIndex = index;
@@ -2079,21 +2169,38 @@ function showRadarFrame(index) {
     }
   });
 
-  if (radarScrubber) radarScrubber.value = String(index);
+  if (radarScrubber) {
+    radarScrubber.value = String(index);
+    const pct = radarTileLayers.length > 1
+      ? (index / (radarTileLayers.length - 1)) * 100
+      : 100;
+    radarScrubber.style.setProperty('--progress', `${pct}%`);
+  }
 
   const activeFrame = radarTileLayers[index];
   if (activeFrame && activeFrame.time) {
     const frameDate = new Date(activeFrame.time * 1000);
+    const dateStr = frameDate.toLocaleDateString('en-US', {
+      weekday: 'short',
+      month: 'short',
+      day: 'numeric'
+    });
     const timeStr = frameDate.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
-    if (radarTimeLabel) radarTimeLabel.textContent = timeStr;
+    if (radarTimeLabel) radarTimeLabel.textContent = `${dateStr} · ${timeStr}`;
+    if (radarCompactTimeLabel) radarCompactTimeLabel.textContent = timeStr;
 
     const diffMins = Math.round((Date.now() - frameDate.getTime()) / 60000);
     if (radarFrameLabel) {
-      if (diffMins <= 5) {
+      if (activeFrame.isForecast || diffMins < -2) {
+        radarFrameLabel.textContent = 'Forecast';
+      } else if (diffMins <= 5) {
         radarFrameLabel.textContent = 'Live';
       } else {
-        radarFrameLabel.textContent = `-${diffMins}m`;
+        radarFrameLabel.textContent = `Past · -${diffMins}m`;
       }
+    }
+    if (radarCompactFrameLabel) {
+      radarCompactFrameLabel.textContent = timeStr;
     }
   }
 }
@@ -2169,17 +2276,21 @@ async function initOrUpdateRadar(lat, lon, locationName) {
 
     if (radarApiData && radarApiData.radar?.past?.length) {
       const host = radarApiData.host || 'https://tilecache.rainviewer.com';
-      const past = radarApiData.radar.past.slice(-12);
+      const past = radarApiData.radar.past.slice(-13).map(f => ({ ...f, isForecast: false }));
+      const nowcast = Array.isArray(radarApiData.radar.nowcast)
+        ? radarApiData.radar.nowcast.map(f => ({ ...f, isForecast: true }))
+        : [];
+      const combined = [...past, ...nowcast];
 
-      const oldTimes = new Set(radarTileLayers.map(f => f.time));
-      const newTimes = new Set(past.map(f => f.time));
+      const oldTimes = new Set(radarAllFrames.map(f => f.time));
+      const newTimes = new Set(combined.map(f => f.time));
       const timestampsDiffer = oldTimes.size !== newTimes.size || [...newTimes].some(t => !oldTimes.has(t));
 
       if (timestampsDiffer) {
-        radarTileLayers.forEach(f => {
+        radarAllFrames.forEach(f => {
           if (radarMap.hasLayer(f.layer)) radarMap.removeLayer(f.layer);
         });
-        radarTileLayers = past.map(f => {
+        radarAllFrames = combined.map(f => {
           const layer = L.tileLayer(`${host}${f.path}/256/{z}/{x}/{y}/2/1_1.png`, {
             pane: 'radarPane',
             opacity: 0,
@@ -2188,17 +2299,11 @@ async function initOrUpdateRadar(lat, lon, locationName) {
             maxZoom: 18,
             maxNativeZoom: 7
           });
-          return { time: f.time, path: f.path, layer };
+          return { time: f.time, path: f.path, layer, isForecast: f.isForecast };
         });
       }
 
-      if (radarScrubber) {
-        radarScrubber.min = '0';
-        radarScrubber.max = String(radarTileLayers.length - 1);
-        radarScrubber.value = String(radarTileLayers.length - 1);
-      }
-
-      showRadarFrame(radarTileLayers.length - 1);
+      applyRadarRange(radarRangeMode);
       setTimeout(() => radarMap && radarMap.invalidateSize(), 150);
     }
   } catch (err) {
@@ -2303,6 +2408,15 @@ radarPlayBtn?.addEventListener('click', () => {
 radarScrubber?.addEventListener('input', (e) => {
   stopRadarAnimation();
   showRadarFrame(parseInt(e.target.value, 10) || 0);
+});
+
+radarRangeBtns.forEach((btn) => {
+  btn.addEventListener('click', () => {
+    const range = btn.dataset.range;
+    if (!range || range === radarRangeMode) return;
+    stopRadarAnimation();
+    applyRadarRange(range);
+  });
 });
 
 // ── Helpers ──

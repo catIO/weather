@@ -199,7 +199,7 @@
         <div class="radar-header">
           <div class="radar-title-group">
             <h2>Live Radar</h2>
-            <span id="radarTimeLabel" class="radar-time-badge">Loading...</span>
+            <span id="radarCompactTimeLabel" class="radar-time-badge">Loading...</span>
           </div>
           <div class="radar-header-actions">
             <button id="expandRadarBtn" class="icon-btn" aria-label="Enlarge radar view" title="Enlarge view">
@@ -214,15 +214,28 @@
             <span class="legend-bar"></span>
             <span class="legend-text">Heavy / Storm</span>
           </div>
-        </div>
-        <div class="radar-controls">
-          <button id="radarPlayBtn" class="radar-play-btn" aria-label="Play animation" title="Play / Pause">
-            <span class="material-icons" id="radarPlayIcon">play_arrow</span>
-          </button>
-          <div class="radar-track-container">
-            <input type="range" id="radarScrubber" min="0" max="0" value="0" step="1" aria-label="Radar timeline scrubber" />
+          <div class="radar-overlay-controls" role="region" aria-label="Radar timeline controls">
+            <div class="radar-overlay-top">
+              <button id="radarPlayBtn" class="radar-play-btn" aria-label="Play animation" title="Play / Pause">
+                <span class="material-icons" id="radarPlayIcon">play_arrow</span>
+              </button>
+              <div class="radar-status-center">
+                <div id="radarFrameLabel" class="radar-status-title">Live</div>
+                <div id="radarTimeLabel" class="radar-status-subtitle">Loading...</div>
+              </div>
+              <div class="radar-range-toggle" role="group" aria-label="Radar time range">
+                <button type="button" class="radar-range-btn" data-range="1h" aria-pressed="false">1h</button>
+                <button type="button" class="radar-range-btn active" data-range="2h" aria-pressed="true">2h</button>
+              </div>
+            </div>
+            <div class="radar-overlay-timeline">
+              <div class="radar-track-container">
+                <input type="range" id="radarScrubber" min="0" max="0" value="0" step="1" aria-label="Radar timeline scrubber" />
+              </div>
+              <div id="radarTimelineTicks" class="radar-timeline-ticks"></div>
+            </div>
+            <span id="radarCompactFrameLabel" class="radar-frame-label">Live</span>
           </div>
-          <span id="radarFrameLabel" class="radar-frame-label">Live</span>
         </div>
       </section>
     </div>
